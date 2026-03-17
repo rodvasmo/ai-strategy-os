@@ -1,8 +1,16 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.models.schemas import StrategyInput
-from app.services.orchestrator import generate_strategy_model
+from app.models.schemas import (
+    StrategyInput,
+    StrategyMappingInput,
+    StrategyReviewInput,
+)
+from app.services.orchestrator import (
+    generate_strategy_framing,
+    generate_strategy_mapping,
+    generate_strategy_review,
+)
 
 app = FastAPI(title="AI Strategy OS API")
 
@@ -25,10 +33,25 @@ def health():
     return {"status": "ok"}
 
 
-@app.post("/generate-strategy")
-def generate_strategy(payload: StrategyInput):
+@app.post("/generate-strategy-framing")
+def strategy_framing(payload: StrategyInput):
     try:
-        result = generate_strategy_model(payload)
-        return result.model_dump()
+        return generate_strategy_framing(payload)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/generate-strategy-mapping")
+def strategy_mapping(payload: StrategyMappingInput):
+    try:
+        return generate_strategy_mapping(payload)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/generate-strategy-review")
+def strategy_review(payload: StrategyReviewInput):
+    try:
+        return generate_strategy_review(payload)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
