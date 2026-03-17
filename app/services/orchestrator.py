@@ -2,6 +2,7 @@ import json
 
 from app.models.schemas import (
     StrategyInput,
+    StrategyMappingInput,
     StrategyReviewInput,
     FramingOutput,
     MappingOutput,
@@ -9,8 +10,10 @@ from app.models.schemas import (
     PortfolioOutput,
     NarrativeOutput,
 )
-
-from app.services.parser import build_strategy_context
+from app.services.parser import (
+    build_strategy_context,
+    build_strategy_context_from_mapping_input,
+)
 from app.services.llm import call_llm_json
 from app.services.scoring import calculate_strategy_score
 
@@ -21,18 +24,15 @@ from app.agents.portfolio_intelligence_agent import SYSTEM_PROMPT as PORTFOLIO_P
 from app.agents.narrative_agent import SYSTEM_PROMPT as NARRATIVE_PROMPT
 
 
-# 🔥 NORMALIZATION LAYER (CRÍTICO)
 def normalize_mapping(mapping_data: dict) -> dict:
-    # 1. Corrigir targets para string
     for outcome in mapping_data.get("outcomes", []):
-        if "target" in outcome:
+        if "target" in outcome and outcome["target"] is not None:
             outcome["target"] = str(outcome["target"])
 
     for kpi in mapping_data.get("kpis", []):
-        if "target" in kpi:
+        if "target" in kpi and kpi["target"] is not None:
             kpi["target"] = str(kpi["target"])
 
-    # 2. Corrigir strategy_graph se vier como lista
     graph = mapping_data.get("strategy_graph")
 
     if isinstance(graph, list):
@@ -44,20 +44,19 @@ def normalize_mapping(mapping_data: dict) -> dict:
                     "kpi_leading": item.get("kpi_leading", ""),
                     "kpi_lagging": item.get("kpi_lagging", ""),
                     "outcome": item.get("outcome", ""),
-                    "gap": item.get("gap", "")
+                    "gap": item.get("gap", ""),
                 }
         mapping_data["strategy_graph"] = fixed_graph
+
+    if graph is None:
+        mapping_data["strategy_graph"] = {}
 
     return mapping_data
 
 
-# =========================
-# CORE GENERATION
-# =========================
-def generate_strategy_core(payload: StrategyInput):
+def generate_strategy_framing(payload: StrategyInput):
     base_context = build_strategy_context(payload)
 
-    # STEP 1 — Strategy Framing
     framing_user_prompt = f"""
 Analise os materiais estratégicos abaixo e construa o framing estratégico.
 
@@ -69,7 +68,15 @@ Materiais:
     framing_data = call_llm_json(FRAMING_PROMPT, framing_user_prompt)
     framing = FramingOutput(**framing_data)
 
-    # STEP 2 — Strategy Mapping
+    return {
+        "framing": framing.model_dump()
+    }
+
+
+def generate_strategy_mapping(payload: StrategyMappingInput):
+    base_context = build_strategy_context_from_mapping_input(payload)
+    framing = payload.framing
+
     mapping_user_prompt = f"""
 Construa o modelo executável da estratégia.
 
@@ -90,32 +97,24 @@ Regras adicionais obrigatórias:
 - seja específico e quantitativo
 
 Framing estratégico:
-{json.dumps(framing.model_dump(), ensure_ascii=False)}
+{json.dumps(framing, ensure_ascii=False)}
 
 Materiais originais:
 {base_context}
 """
     mapping_data = call_llm_json(MAPPING_PROMPT, mapping_user_prompt)
-
-    # 🔥 NORMALIZAÇÃO (CRÍTICO)
     mapping_data = normalize_mapping(mapping_data)
-
     mapping = MappingOutput(**mapping_data)
 
     return {
-        "framing": framing.model_dump(),
         "mapping": mapping.model_dump()
     }
 
 
-# =========================
-# REVIEW
-# =========================
 def generate_strategy_review(payload: StrategyReviewInput):
     framing = payload.framing
     mapping = payload.mapping
 
-    # STEP 3 — KPI Integrity
     kpi_user_prompt = f"""
 Revise a camada de KPIs com rigor e governança.
 
@@ -127,7 +126,6 @@ KPIs:
     kpi_data = call_llm_json(KPI_PROMPT, kpi_user_prompt)
     kpi_integrity = KPIIntegrityOutput(**kpi_data)
 
-    # STEP 4 — Portfolio Intelligence
     portfolio_user_prompt = f"""
 Avalie o portfólio estratégico abaixo.
 
@@ -154,7 +152,6 @@ Strategy graph:
     portfolio_data = call_llm_json(PORTFOLIO_PROMPT, portfolio_user_prompt)
     portfolio = PortfolioOutput(**portfolio_data)
 
-    # STEP 5 — Narrative
     narrative_user_prompt = f"""
 Escreva a narrativa executiva com base nos elementos abaixo.
 
@@ -178,15 +175,15 @@ Portfolio:
     review_result = {
         "kpi_integrity": kpi_integrity.model_dump(),
         "portfolio": portfolio.model_dump(),
-        "narrative": narrative.model_dump()
+        "narrative": narrative.model_dump(),
     }
 
     score = calculate_strategy_score(
         core_result={
             "framing": framing,
-            "mapping": mapping
+            "mapping": mapping,
         },
-        review_result=review_result
+        review_result=review_result,
     )
 
     review_result["strategy_score"] = score
