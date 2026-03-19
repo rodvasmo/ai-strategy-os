@@ -1,33 +1,27 @@
 from typing import Any, Dict, List, Optional
+
 from pydantic import BaseModel, Field
 
 
+# =========================================================
+# CORE INPUTS
+# =========================================================
 class StrategyInput(BaseModel):
     company_name: Optional[str] = None
-    company_context: str = Field(..., description="Contexto geral da empresa e do problema estratégico")
+    company_context: str = Field(
+        ...,
+        description="Contexto geral da empresa e do problema estratégico"
+    )
     annual_plan_text: Optional[str] = None
     financial_model_text: Optional[str] = None
     market_analysis_text: Optional[str] = None
     leadership_notes_text: Optional[str] = None
     kpi_targets_text: Optional[str] = None
     scenario_assumptions_text: Optional[str] = None
-
-
-class StrategyTheme(BaseModel):
-    name: str
-    description: str
-    where_to_play: Optional[str] = None
-    how_to_win: Optional[str] = None
-    economic_logic: Optional[str] = None
-    tradeoffs: List[str] = []
-    not_doing: List[str] = []
-    constraints: List[str] = []
-
-
-class FramingOutput(BaseModel):
-    strategic_themes: List[StrategyTheme]
-    assumptions: List[str]
-    contradictions: List[str]
+    industry_reports_text: Optional[str] = None
+    competitor_landscape_text: Optional[str] = None
+    market_benchmarks_text: Optional[str] = None
+    customer_research_text: Optional[str] = None
 
 
 class StrategyMappingInput(BaseModel):
@@ -40,51 +34,116 @@ class StrategyMappingInput(BaseModel):
     leadership_notes_text: Optional[str] = None
     kpi_targets_text: Optional[str] = None
     scenario_assumptions_text: Optional[str] = None
+    industry_reports_text: Optional[str] = None
+    competitor_landscape_text: Optional[str] = None
+    market_benchmarks_text: Optional[str] = None
+    customer_research_text: Optional[str] = None
 
 
+class StrategyReviewInput(BaseModel):
+    framing: Dict[str, Any]
+    mapping: Dict[str, Any]
+
+
+# =========================================================
+# FILE INGESTION
+# =========================================================
+class StrategyFileIngestResponse(BaseModel):
+    annual_plan_text: str = ""
+    financial_model_text: str = ""
+    market_analysis_text: str = ""
+    leadership_notes_text: str = ""
+    kpi_targets_text: str = ""
+    scenario_assumptions_text: str = ""
+    industry_reports_text: str = ""
+    competitor_landscape_text: str = ""
+    market_benchmarks_text: str = ""
+    customer_research_text: str = ""
+
+
+# =========================================================
+# FRAMING
+# =========================================================
+class StrategicTheme(BaseModel):
+    name: str
+    description: str
+    where_to_play: str
+    how_to_win: str
+    economic_logic: str
+    tradeoffs: List[str]
+    not_doing: List[str]
+    constraints: List[str]
+
+
+class FramingOutput(BaseModel):
+    strategic_themes: List[StrategicTheme]
+    assumptions: List[str]
+    contradictions: List[str]
+
+
+# =========================================================
+# MAPPING
+# =========================================================
 class Outcome(BaseModel):
     name: str
     linked_theme: str
-    target: Optional[str] = None
+    target: str
 
 
 class KPI(BaseModel):
     name: str
     type: str
-    target: Optional[str] = None
-    owner: Optional[str] = None
-    formula: Optional[str] = None
-    source: Optional[str] = None
+    target: str
+    owner: str
+    formula: str
+    source: str
 
 
 class Initiative(BaseModel):
     name: str
     linked_theme: str
-    linked_outcome: Optional[str] = None
-    expected_impact: Optional[str] = None
-    expected_kpi_delta: Optional[str] = None
-    time_horizon: Optional[str] = None
-    owner: Optional[str] = None
-    status: Optional[str] = None
+    linked_outcome: str
+    expected_impact: str
+    expected_kpi_delta: str
+    time_horizon: str
+    owner: str
+    status: str
+
+
+class StrategyGraphNode(BaseModel):
+    kpi_leading: str
+    kpi_lagging: str
+    outcome: str
+    causal_logic: str = ""
 
 
 class MappingOutput(BaseModel):
     outcomes: List[Outcome]
     kpis: List[KPI]
     initiatives: List[Initiative]
-    strategy_graph: Dict[str, Any]
+    strategy_graph: Dict[str, StrategyGraphNode]
 
 
+# =========================================================
+# REVIEW
+# =========================================================
 class KPIIssue(BaseModel):
     kpi_name: str
     issue_type: str
     description: str
-    recommendation: Optional[str] = None
+    recommendation: str
+
+
+class KPIStandard(BaseModel):
+    kpi_name: str
+    suggested_formula: str
+    suggested_owner: str
+    suggested_source: str
 
 
 class KPIIntegrityOutput(BaseModel):
     issues: List[KPIIssue]
-    suggested_standards: List[Dict[str, str]]
+    suggested_standards: List[KPIStandard]
 
 
 class PortfolioInsight(BaseModel):
@@ -92,7 +151,7 @@ class PortfolioInsight(BaseModel):
     classification: str
     reason: str
     recommendation: str
-    capital_action: Optional[str] = None
+    capital_action: str
 
 
 class PortfolioOutput(BaseModel):
@@ -101,7 +160,7 @@ class PortfolioOutput(BaseModel):
     underinvestment_areas: List[str]
 
 
-class RecommendationItem(BaseModel):
+class NarrativeRecommendation(BaseModel):
     action: str
     tradeoff: str
     expected_impact: str
@@ -112,10 +171,42 @@ class NarrativeOutput(BaseModel):
     what_is_happening: List[str]
     why_it_is_happening: List[str]
     key_risks: List[str]
-    recommendations: List[RecommendationItem]
+    recommendations: List[NarrativeRecommendation]
     decisions_required: List[str]
 
 
-class StrategyReviewInput(BaseModel):
+# =========================================================
+# SCORE
+# =========================================================
+class StrategyScoreDiagnostics(BaseModel):
+    uncovered_outcomes: List[str]
+    graph_gap_count: int
+    kpi_issue_count: int
+    weak_capital_actions: int
+
+
+class StrategyScore(BaseModel):
+    overall_score: float
+    score_breakdown: Dict[str, float]
+    diagnostics: StrategyScoreDiagnostics
+
+
+# =========================================================
+# CONSOLIDATED EXECUTIVE SUMMARY
+# =========================================================
+class ExecutiveSummary(BaseModel):
+    headline: str
+    top_insights: List[str]
+    priority_actions: List[str]
+    key_metrics: List[str]
+    final_takeaway: str
+
+
+class FullStrategyAnalysisResponse(BaseModel):
     framing: Dict[str, Any]
     mapping: Dict[str, Any]
+    kpi_integrity: Dict[str, Any]
+    portfolio: Dict[str, Any]
+    narrative: Dict[str, Any]
+    strategy_score: Dict[str, Any]
+    executive_summary: ExecutiveSummary
