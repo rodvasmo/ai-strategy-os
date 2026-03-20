@@ -1,6 +1,7 @@
 from typing import Annotated, Optional
 
 from fastapi import FastAPI, File, UploadFile, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.models.schemas import (
     StrategyInput,
@@ -22,6 +23,16 @@ app = FastAPI(
     version="0.1.0",
 )
 
+# =========================================================
+# CORS
+# =========================================================
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # para teste; depois restringimos
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 @app.get("/")
 def root():
