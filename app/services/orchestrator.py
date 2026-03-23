@@ -1,5 +1,6 @@
 import ast
 import json
+from collections import defaultdict
 
 from app.models.schemas import (
     StrategyInput,
@@ -252,6 +253,277 @@ def normalize_mapping(mapping_data: dict) -> dict:
     return mapping_data
 
 
+def _safe_status(status: str) -> str:
+    allowed = {"planejado", "em execução", "concluído"}
+    status = str(status or "").strip().lower()
+    if status in allowed:
+        return status
+    return "planejado"
+
+
+def _slugify_owner_from_theme(theme_name: str) -> str:
+    name = (theme_name or "").lower()
+    if "estoque" in name or "capital" in name or "margem" in name:
+        return "Operações"
+    if "digital" in name or "tecnologia" in name or "produto" in name:
+        return "Produto"
+    if "clube" in name or "assinatura" in name or "cliente" in name:
+        return "Marketing"
+    return "Estratégia"
+
+
+def _infer_time_horizon_from_theme(theme_name: str) -> str:
+    name = (theme_name or "").lower()
+    if "estoque" in name or "margem" in name:
+        return "6 meses"
+    if "digital" in name or "tecnologia" in name:
+        return "9 meses"
+    return "6 meses"
+
+
+def _pick_outcome_for_theme(outcomes_by_theme: dict, theme_name: str) -> str:
+    theme_outcomes = outcomes_by_theme.get(theme_name, [])
+    if theme_outcomes:
+        return theme_outcomes[0]["name"]
+    return f"Avançar o tema {theme_name}"
+
+
+def _pick_leading_kpi_for_theme(kpis: list, theme_name: str) -> str:
+    theme_name_lower = (theme_name or "").lower()
+
+    theme_keywords = []
+    if "estoque" in theme_name_lower or "capital" in theme_name_lower or "margem" in theme_name_lower:
+        theme_keywords = ["estoque", "giro", "capital", "margem", "custo", "eficiência"]
+    elif "digital" in theme_name_lower or "tecnologia" in theme_name_lower or "produto" in theme_name_lower:
+        theme_keywords = ["digital", "produto", "tecnologia", "convers", "engaj", "onboarding"]
+    elif "clube" in theme_name_lower or "assinatura" in theme_name_lower or "cliente" in theme_name_lower:
+        theme_keywords = ["clube", "assinatura", "churn", "reten", "convers", "engaj"]
+    else:
+        theme_keywords = ["convers", "engaj", "eficiência"]
+
+    leading = [k for k in kpis if str(k.get("type", "")).strip().lower() == "leading"]
+
+    for keyword in theme_keywords:
+        for kpi in leading:
+            if keyword in str(kpi.get("name", "")).lower():
+                return kpi["name"]
+
+    if leading:
+        return leading[0]["name"]
+
+    return ""
+
+
+def _pick_lagging_kpi_for_theme(kpis: list, outcome_name: str, theme_name: str) -> str:
+    lagging = [k for k in kpis if str(k.get("type", "")).strip().lower() == "lagging"]
+    outcome_lower = (outcome_name or "").lower()
+    theme_lower = (theme_name or "").lower()
+
+    for kpi in lagging:
+        kpi_name = str(kpi.get("name", "")).lower()
+        if any(token in kpi_name for token in outcome_lower.split()):
+            return kpi["name"]
+
+    if "estoque" in theme_lower or "capital" in theme_lower:
+        for kpi in lagging:
+            if any(word in str(kpi.get("name", "")).lower() for word in ["estoque", "capital", "margem"]):
+                return kpi["name"]
+
+    if "digital" in theme_lower or "tecnologia" in theme_lower:
+        for kpi in lagging:
+            if any(word in str(kpi.get("name", "")).lower() for word in ["receita", "convers", "reten", "mrr"]):
+                return kpi["name"]
+
+    if "clube" in theme_lower or "assinatura" in theme_lower:
+        for kpi in lagging:
+            if any(word in str(kpi.get("name", "")).lower() for word in ["mrr", "churn", "receita", "assin"]):
+                return kpi["name"]
+
+    if lagging:
+        return lagging[0]["name"]
+
+    return ""
+
+
+def _build_default_initiatives_for_theme(theme: dict, outcomes_by_theme: dict) -> list:
+    theme_name = theme["name"]
+    theme_desc = theme.get("description", "")
+    outcome_name = _pick_outcome_for_theme(outcomes_by_theme, theme_name)
+    owner = _slugify_owner_from_theme(theme_name)
+    horizon = _infer_time_horizon_from_theme(theme_name)
+
+    theme_lower = theme_name.lower()
+    desc_lower = theme_desc.lower()
+
+    defaults = []
+
+    if any(word in theme_lower for word in ["estoque", "capital", "margem"]) or any(
+        word in desc_lower for word in ["estoque", "capital", "margem", "financeira", "financeiro"]
+    ):
+        defaults = [
+            {
+                "name": f"Redesenhar políticas operacionais para {theme_name.lower()}",
+                "linked_theme": theme_name,
+                "linked_outcome": outcome_name,
+                "expected_impact": "Melhorar disciplina operacional e capturar ganhos financeiros no curto prazo.",
+                "expected_kpi_delta": "Melhoria operacional mensurável nos indicadores do tema.",
+                "time_horizon": horizon,
+                "owner": owner,
+                "status": "planejado",
+            },
+            {
+                "name": f"Implementar rotina de gestão e acompanhamento para {theme_name.lower()}",
+                "linked_theme": theme_name,
+                "linked_outcome": outcome_name,
+                "expected_impact": "Aumentar previsibilidade, reduzir ineficiências e acelerar execução.",
+                "expected_kpi_delta": "Redução de desperdícios e maior controle sobre o resultado-alvo.",
+                "time_horizon": horizon,
+                "owner": owner,
+                "status": "planejado",
+            },
+        ]
+    elif any(word in theme_lower for word in ["digital", "tecnologia", "produto", "experiência"]) or any(
+        word in desc_lower for word in ["digital", "tecnologia", "produto", "experiência", "phygital"]
+    ):
+        defaults = [
+            {
+                "name": f"Lançar iniciativas de produto para fortalecer {theme_name.lower()}",
+                "linked_theme": theme_name,
+                "linked_outcome": outcome_name,
+                "expected_impact": "Elevar adoção, melhorar experiência e aumentar retenção.",
+                "expected_kpi_delta": "Melhoria mensurável nos indicadores de adoção e engajamento.",
+                "time_horizon": horizon,
+                "owner": owner,
+                "status": "planejado",
+            },
+            {
+                "name": f"Implementar jornada operacional para acelerar {theme_name.lower()}",
+                "linked_theme": theme_name,
+                "linked_outcome": outcome_name,
+                "expected_impact": "Reduzir fricção de uso e aumentar captura de valor da iniciativa.",
+                "expected_kpi_delta": "Melhora de conversão, ativação ou retenção associada ao tema.",
+                "time_horizon": horizon,
+                "owner": owner,
+                "status": "planejado",
+            },
+        ]
+    else:
+        defaults = [
+            {
+                "name": f"Lançar programa estruturado para avançar {theme_name.lower()}",
+                "linked_theme": theme_name,
+                "linked_outcome": outcome_name,
+                "expected_impact": "Acelerar execução do tema estratégico com foco em resultado de negócio.",
+                "expected_kpi_delta": "Melhoria mensurável nos KPIs associados ao tema.",
+                "time_horizon": horizon,
+                "owner": owner,
+                "status": "planejado",
+            },
+            {
+                "name": f"Criar rotina de gestão para sustentar {theme_name.lower()}",
+                "linked_theme": theme_name,
+                "linked_outcome": outcome_name,
+                "expected_impact": "Aumentar consistência de execução e reduzir dispersão estratégica.",
+                "expected_kpi_delta": "Maior estabilidade operacional e evolução do resultado-alvo.",
+                "time_horizon": horizon,
+                "owner": owner,
+                "status": "planejado",
+            },
+        ]
+
+    return defaults
+
+
+def ensure_mapping_balance(mapping_data: dict, framing_data: dict) -> dict:
+    mapping_data = normalize_mapping(mapping_data)
+    strategic_themes = framing_data.get("strategic_themes", [])
+
+    theme_names = [t.get("name", "").strip() for t in strategic_themes if str(t.get("name", "")).strip()]
+    theme_name_set = set(theme_names)
+
+    # outcomes by theme
+    outcomes = mapping_data.get("outcomes", [])
+    outcomes_by_theme = defaultdict(list)
+    for outcome in outcomes:
+        linked_theme = str(outcome.get("linked_theme", "")).strip()
+        if linked_theme:
+            outcomes_by_theme[linked_theme].append(outcome)
+
+    # sanitize initiatives
+    initiatives = []
+    for item in mapping_data.get("initiatives", []):
+        linked_theme = str(item.get("linked_theme", "")).strip()
+        if linked_theme not in theme_name_set:
+            continue
+
+        linked_outcome = str(item.get("linked_outcome", "")).strip()
+        if not linked_outcome:
+            linked_outcome = _pick_outcome_for_theme(outcomes_by_theme, linked_theme)
+
+        initiatives.append(
+            {
+                "name": str(item.get("name", "")).strip() or f"Iniciativa para {linked_theme}",
+                "linked_theme": linked_theme,
+                "linked_outcome": linked_outcome,
+                "expected_impact": str(item.get("expected_impact", "")).strip() or "Melhorar execução e capturar resultado de negócio.",
+                "expected_kpi_delta": str(item.get("expected_kpi_delta", "")).strip() or "Melhoria mensurável nos KPIs associados.",
+                "time_horizon": str(item.get("time_horizon", "")).strip() or _infer_time_horizon_from_theme(linked_theme),
+                "owner": str(item.get("owner", "")).strip() or _slugify_owner_from_theme(linked_theme),
+                "status": _safe_status(item.get("status", "")),
+            }
+        )
+
+    initiatives_by_theme = defaultdict(list)
+    for initiative in initiatives:
+        initiatives_by_theme[initiative["linked_theme"]].append(initiative)
+
+    # guarantee at least 2 initiatives per theme
+    for theme in strategic_themes:
+        theme_name = str(theme.get("name", "")).strip()
+        current = initiatives_by_theme.get(theme_name, [])
+
+        if len(current) < 2:
+            defaults = _build_default_initiatives_for_theme(theme, outcomes_by_theme)
+            existing_names = {i["name"] for i in current}
+
+            for candidate in defaults:
+                if candidate["name"] not in existing_names:
+                    current.append(candidate)
+                    existing_names.add(candidate["name"])
+                if len(current) >= 2:
+                    break
+
+            initiatives_by_theme[theme_name] = current
+
+    # flatten with balanced ordering by theme
+    balanced_initiatives = []
+    for theme_name in theme_names:
+        balanced_initiatives.extend(initiatives_by_theme.get(theme_name, [])[:4])
+
+    mapping_data["initiatives"] = balanced_initiatives
+
+    # rebuild strategy graph with full coverage
+    kpis = mapping_data.get("kpis", [])
+    strategy_graph = {}
+
+    for initiative in mapping_data["initiatives"]:
+        theme_name = initiative["linked_theme"]
+        outcome_name = initiative["linked_outcome"]
+
+        kpi_leading = _pick_leading_kpi_for_theme(kpis, theme_name)
+        kpi_lagging = _pick_lagging_kpi_for_theme(kpis, outcome_name, theme_name)
+
+        strategy_graph[initiative["name"]] = {
+            "kpi_leading": kpi_leading,
+            "kpi_lagging": kpi_lagging,
+            "outcome": outcome_name,
+            "causal_logic": f"A iniciativa atua no tema '{theme_name}', melhora '{kpi_leading}' e contribui para o outcome '{outcome_name}' por meio de execução disciplinada.",
+        }
+
+    mapping_data["strategy_graph"] = strategy_graph
+    return mapping_data
+
+
 # =========================================================
 # EXECUTIVE SUMMARY
 # =========================================================
@@ -262,7 +534,6 @@ def build_executive_summary(
     review: dict,
 ) -> dict:
     strategy_score = review.get("strategy_score", {})
-    portfolio = review.get("portfolio", {})
     narrative = review.get("narrative", {})
 
     company_name = payload.company_name or "Empresa"
@@ -345,6 +616,7 @@ Materiais originais:
 """
     mapping_data = call_llm_json(MAPPING_PROMPT, mapping_user_prompt)
     mapping_data = normalize_mapping(mapping_data)
+    mapping_data = ensure_mapping_balance(mapping_data, framing)
     mapping = MappingOutput(**mapping_data)
 
     return {
