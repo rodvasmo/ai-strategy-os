@@ -1,106 +1,222 @@
-from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+import os
 import json
+import re
+from typing import List, Optional
 
-# ---------------------------------------------------
-# APP INIT
-# ---------------------------------------------------
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel, Field, ValidationError
+from openai import OpenAI
 
 app = FastAPI()
-
-# ---------------------------------------------------
-# CORS (FIX DEFINITIVO DO 405)
-# ---------------------------------------------------
+from fastapi.middleware.cors import CORSMiddleware
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # depois pode restringir
+    allow_origins=["*"],
     allow_credentials=True,
-    allow_methods=["*"],  # 🔥 ESSENCIAL PARA OPTIONS
+    allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# ---------------------------------------------------
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+# =========================
 # MODELS
-# ---------------------------------------------------
+# =========================
 
-class StrategyInput(BaseModel):
+class Initiative(BaseModel):
+    title: str
+    description: str
+    type: str
+
+class Theme(BaseModel):
+    id: int
+    title: str
+    description: str
+    outcomes: List[str] = Field(..., min_items=3, max_items=3)
+    initiatives: List[Initiative] = Field(..., min_items=5, max_items=8)
+
+class StrategyResponse(BaseModel):
+    themes: List[Theme] = Field(..., min_items=3, max_items=5)
+
+class StrategyRequest(BaseModel):
+    company_name: str
+    sector: str
     context: str
-    objective: str
+    ambition: str
+    constraints: Optional[str] = ""
+    language: Optional[str] = "pt-BR"
 
-# ---------------------------------------------------
-# HEALTH CHECK
-# ---------------------------------------------------
+# =========================
+# PROMPTS
+# =========================
 
-@app.get("/")
-def health():
-    return {"status": "ok"}
+def system_prompt(language: str):
+    return f"""
+Você é um estrategista sênior.
 
-# ---------------------------------------------------
-# MOCK LLM CALL (SUBSTITUA PELO SEU CLIENT)
-# ---------------------------------------------------
+REGRAS NÃO NEGOCIÁVEIS:
 
-def call_llm(prompt: str):
-    # ⚠️ Substitua isso pela sua integração real com OpenAI
-    return {
-        "themes": [],
-        "outcomes": [],
-        "initiatives": []
-    }
+1. Gere entre 3 e 5 temas estratégicos
+2. Ordene os temas do MAIS relevante para o MENOS relevante
+3. Cada tema deve ter exatamente 3 outcomes
+4. Cada tema deve ter ENTRE 5 E 8 iniciativas
+5. NENHUM tema pode ficar sem iniciativas
+6. Iniciativas devem ser:
+   - específicas
+   - acionáveis
+   - variadas (produto, comercial, operação, tecnologia)
 
-# ---------------------------------------------------
-# VALIDATION
-# ---------------------------------------------------
+7. NÃO use outros nomes como actions, projects ou recommendations
+8. Use APENAS "initiatives"
 
-def validate_response(data: dict):
-    if "outcomes" not in data or len(data["outcomes"]) == 0:
-        raise ValueError("No outcomes generated")
+9. Retorne SOMENTE JSON válido
 
-    if "initiatives" not in data or len(data["initiatives"]) == 0:
-        raise ValueError("No initiatives generated")
+Idioma: {language}
 
-    return data
+Formato obrigatório:
 
-# ---------------------------------------------------
-# ENDPOINT 1 — FRAMING
-# ---------------------------------------------------
+{{
+  "themes": [
+    {{
+      "id": 1,
+      "title": "string",
+      "description": "string",
+      "outcomes": ["...", "...", "..."],
+      "initiatives": [
+        {{
+          "title": "...",
+          "description": "...",
+          "type": "growth"
+        }}
+      ]
+    }}
+  ]
+}}
+""".strip()
 
-@app.post("/generate-strategy-framing")
-def generate_framing(input: StrategyInput):
+def user_prompt(req: StrategyRequest):
+    return f"""
+Empresa: {req.company_name}
+Setor: {req.sector}
+Contexto: {req.context}
+Ambição: {req.ambition}
+Restrições: {req.constraints}
+
+Gere a estratégia completa.
+""".strip()
+
+# =========================
+# HELPERS
+# =========================
+
+def extract_json(text: str):
     try:
-        prompt = f"""
-        Generate strategic themes (3 to 5), outcomes and initiatives.
-        Context: {input.context}
-        Objective: {input.objective}
-        """
+        return json.loads(text)
+    except:
+        match = re.search(r"\{.*\}", text, re.DOTALL)
+        if match:
+            return json.loads(match.group(0))
+        raise ValueError("JSON inválido")
 
-        response = call_llm(prompt)
+def fix_payload(payload: dict):
+    """
+    Corrige erros comuns do LLM
+    """
 
-        validated = validate_response(response)
+    themes = payload.get("themes", [])
 
-        return validated
+    for i, t in enumerate(themes):
+        # garantir ID
+        t["id"] = t.get("id") or (i + 1)
 
-    except Exception as e:
+        # garantir outcomes
+        if len(t.get("outcomes", [])) < 3:
+            t["outcomes"] = (t.get("outcomes", []) + ["placeholder"] * 3)[:3]
+
+        # normalizar initiatives
+        initiatives = (
+            t.get("initiatives")
+            or t.get("actions")
+            or t.get("projects")
+            or []
+        )
+
+        fixed = []
+
+        for item in initiatives:
+            if isinstance(item, str):
+                fixed.append({
+                    "title": item,
+                    "description": item,
+                    "type": "product"
+                })
+            else:
+                fixed.append({
+                    "title": item.get("title", "Iniciativa"),
+                    "description": item.get("description", "Descrição"),
+                    "type": item.get("type", "product")
+                })
+
+        t["initiatives"] = fixed[:8]
+
+    return payload
+
+def needs_regeneration(payload: dict):
+    themes = payload.get("themes", [])
+
+    if len(themes) < 3:
+        return True
+
+    for t in themes:
+        if len(t.get("initiatives", [])) < 5:
+            return True
+
+    return False
+
+# =========================
+# ENDPOINT
+# =========================
+
+@app.post("/generate-strategy-framing", response_model=StrategyResponse)
+def generate_strategy(req: StrategyRequest):
+    try:
+        # chamada principal
+        response = client.chat.completions.create(
+            model="gpt-4.1",
+            temperature=0.2,
+            response_format={"type": "json_object"},
+            messages=[
+                {"role": "system", "content": system_prompt(req.language)},
+                {"role": "user", "content": user_prompt(req)}
+            ]
+        )
+
+        content = response.choices[0].message.content
+        payload = extract_json(content)
+        payload = fix_payload(payload)
+
+        # retry automático se incompleto
+        if needs_regeneration(payload):
+            retry = client.chat.completions.create(
+                model="gpt-4.1",
+                temperature=0.2,
+                response_format={"type": "json_object"},
+                messages=[
+                    {"role": "system", "content": system_prompt(req.language)},
+                    {
+                        "role": "user",
+                        "content": "Refaça garantindo que TODOS os temas tenham no mínimo 5 iniciativas."
+                    }
+                ]
+            )
+
+            payload = extract_json(retry.choices[0].message.content)
+            payload = fix_payload(payload)
+
+        return payload
+
+    except ValidationError as e:
         raise HTTPException(status_code=500, detail=str(e))
-
-# ---------------------------------------------------
-# ENDPOINT 2 — MAPPING
-# ---------------------------------------------------
-
-@app.post("/generate-strategy-mapping")
-def generate_mapping(input: StrategyInput):
-    try:
-        prompt = f"""
-        Generate KPIs and initiatives based on strategy.
-        Context: {input.context}
-        Objective: {input.objective}
-        """
-
-        response = call_llm(prompt)
-
-        # aqui você pode validar diferente se quiser
-        return response
-
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
