@@ -1,125 +1,221 @@
-from typing import Annotated, Optional
+import os
+import json
+import re
+from typing import List, Optional
 
-from fastapi import FastAPI, File, UploadFile, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel, Field, ValidationError
+from openai import OpenAI
 
-from app.models.schemas import (
-    StrategyInput,
-    StrategyMappingInput,
-    StrategyReviewInput,
-    StrategyFileIngestResponse,
-    FullStrategyAnalysisResponse,
-)
-from app.services.orchestrator import (
-    generate_strategy_framing,
-    generate_strategy_mapping,
-    generate_strategy_review,
-    run_full_strategy_analysis,
-)
-from app.services.parser import extract_text_from_upload
+app = FastAPI()
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-app = FastAPI(
-    title="AI Strategy OS API",
-    version="0.1.0",
-)
+# =========================
+# MODELS
+# =========================
 
-# =========================================================
-# CORS
-# =========================================================
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # para teste; depois restringimos
-    allow_credentials=False,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-@app.get("/")
-def root():
-    return {"message": "AI Strategy OS API is running"}
+class Initiative(BaseModel):
+    title: str
+    description: str
+    type: str
 
 
-@app.get("/health")
-def health():
-    return {"status": "ok"}
+class Theme(BaseModel):
+    id: int
+    title: str
+    description: str
+    outcomes: List[str] = Field(..., min_items=3, max_items=3)
+    initiatives: List[Initiative] = Field(..., min_items=5, max_items=8)
 
 
-# =========================================================
-# FILE INGESTION
-# =========================================================
-@app.post("/ingest-strategy-files", response_model=StrategyFileIngestResponse)
-async def ingest_strategy_files_route(
-    annual_plan_files: Annotated[Optional[list[UploadFile]], File()] = None,
-    financial_model_files: Annotated[Optional[list[UploadFile]], File()] = None,
-    market_analysis_files: Annotated[Optional[list[UploadFile]], File()] = None,
-    leadership_notes_files: Annotated[Optional[list[UploadFile]], File()] = None,
-    kpi_targets_files: Annotated[Optional[list[UploadFile]], File()] = None,
-    scenario_assumptions_files: Annotated[Optional[list[UploadFile]], File()] = None,
-    industry_reports_files: Annotated[Optional[list[UploadFile]], File()] = None,
-    competitor_landscape_files: Annotated[Optional[list[UploadFile]], File()] = None,
-    market_benchmarks_files: Annotated[Optional[list[UploadFile]], File()] = None,
-    customer_research_files: Annotated[Optional[list[UploadFile]], File()] = None,
-):
-    async def join_file_text(files: Optional[list[UploadFile]], label: str) -> str:
-        if not files:
-            return ""
-
-        chunks = []
-        for uploaded in files:
-            try:
-                text = await extract_text_from_upload(uploaded)
-                chunks.append(f"[{label}]\n[FILE: {uploaded.filename}]\n{text}")
-            except Exception as e:
-                raise HTTPException(status_code=400, detail=f"Erro ao processar arquivo {uploaded.filename}: {str(e)}")
-        return "\n\n".join(chunks)
-
-    return StrategyFileIngestResponse(
-        annual_plan_text=await join_file_text(annual_plan_files, "ANNUAL PLAN"),
-        financial_model_text=await join_file_text(financial_model_files, "FINANCIAL MODEL"),
-        market_analysis_text=await join_file_text(market_analysis_files, "MARKET ANALYSIS"),
-        leadership_notes_text=await join_file_text(leadership_notes_files, "LEADERSHIP NOTES"),
-        kpi_targets_text=await join_file_text(kpi_targets_files, "KPI TARGETS"),
-        scenario_assumptions_text=await join_file_text(scenario_assumptions_files, "SCENARIO ASSUMPTIONS"),
-        industry_reports_text=await join_file_text(industry_reports_files, "INDUSTRY REPORTS"),
-        competitor_landscape_text=await join_file_text(competitor_landscape_files, "COMPETITOR LANDSCAPE"),
-        market_benchmarks_text=await join_file_text(market_benchmarks_files, "MARKET BENCHMARKS"),
-        customer_research_text=await join_file_text(customer_research_files, "CUSTOMER RESEARCH"),
-    )
+class StrategyResponse(BaseModel):
+    themes: List[Theme] = Field(..., min_items=3, max_items=5)
 
 
-# =========================================================
-# INDIVIDUAL PIPELINE ENDPOINTS
-# =========================================================
-@app.post("/generate-strategy-framing")
-def strategy_framing(payload: StrategyInput):
+class StrategyRequest(BaseModel):
+    company_name: str
+    sector: str
+    context: str
+    ambition: str
+    constraints: Optional[str] = ""
+    language: Optional[str] = "pt-BR"
+
+
+# =========================
+# PROMPTS
+# =========================
+
+def system_prompt(language: str):
+    return f"""
+Você é um estrategista sênior.
+
+REGRAS NÃO NEGOCIÁVEIS:
+
+1. Gere entre 3 e 5 temas estratégicos
+2. Ordene os temas do MAIS relevante para o MENOS relevante
+3. Cada tema deve ter exatamente 3 outcomes
+4. Cada tema deve ter ENTRE 5 E 8 iniciativas
+5. NENHUM tema pode ficar sem iniciativas
+6. Iniciativas devem ser:
+   - específicas
+   - acionáveis
+   - variadas (produto, comercial, operação, tecnologia)
+
+7. NÃO use outros nomes como actions, projects ou recommendations
+8. Use APENAS "initiatives"
+
+9. Retorne SOMENTE JSON válido
+
+Idioma: {language}
+
+Formato obrigatório:
+
+{{
+  "themes": [
+    {{
+      "id": 1,
+      "title": "string",
+      "description": "string",
+      "outcomes": ["...", "...", "..."],
+      "initiatives": [
+        {{
+          "title": "...",
+          "description": "...",
+          "type": "growth"
+        }}
+      ]
+    }}
+  ]
+}}
+""".strip()
+
+
+def user_prompt(req: StrategyRequest):
+    return f"""
+Empresa: {req.company_name}
+Setor: {req.sector}
+Contexto: {req.context}
+Ambição: {req.ambition}
+Restrições: {req.constraints}
+
+Gere a estratégia completa.
+""".strip()
+
+
+# =========================
+# HELPERS
+# =========================
+
+def extract_json(text: str):
     try:
-        return generate_strategy_framing(payload)
-    except Exception as e:
+        return json.loads(text)
+    except:
+        match = re.search(r"\{.*\}", text, re.DOTALL)
+        if match:
+            return json.loads(match.group(0))
+        raise ValueError("JSON inválido")
+
+
+def fix_payload(payload: dict):
+    """
+    Corrige erros comuns do LLM
+    """
+
+    themes = payload.get("themes", [])
+
+    for i, t in enumerate(themes):
+        # garantir ID
+        t["id"] = t.get("id") or (i + 1)
+
+        # garantir outcomes
+        if len(t.get("outcomes", [])) < 3:
+            t["outcomes"] = (t.get("outcomes", []) + ["placeholder"] * 3)[:3]
+
+        # normalizar initiatives
+        initiatives = (
+            t.get("initiatives")
+            or t.get("actions")
+            or t.get("projects")
+            or []
+        )
+
+        fixed = []
+
+        for item in initiatives:
+            if isinstance(item, str):
+                fixed.append({
+                    "title": item,
+                    "description": item,
+                    "type": "product"
+                })
+            else:
+                fixed.append({
+                    "title": item.get("title", "Iniciativa"),
+                    "description": item.get("description", "Descrição"),
+                    "type": item.get("type", "product")
+                })
+
+        t["initiatives"] = fixed[:8]
+
+    return payload
+
+
+def needs_regeneration(payload: dict):
+    themes = payload.get("themes", [])
+
+    if len(themes) < 3:
+        return True
+
+    for t in themes:
+        if len(t.get("initiatives", [])) < 5:
+            return True
+
+    return False
+
+
+# =========================
+# ENDPOINT
+# =========================
+
+@app.post("/generate-strategy-framing", response_model=StrategyResponse)
+def generate_strategy(req: StrategyRequest):
+    try:
+        # chamada principal
+        response = client.chat.completions.create(
+            model="gpt-4.1",
+            temperature=0.2,
+            response_format={"type": "json_object"},
+            messages=[
+                {"role": "system", "content": system_prompt(req.language)},
+                {"role": "user", "content": user_prompt(req)}
+            ]
+        )
+
+        content = response.choices[0].message.content
+        payload = extract_json(content)
+        payload = fix_payload(payload)
+
+        # retry automático se incompleto
+        if needs_regeneration(payload):
+            retry = client.chat.completions.create(
+                model="gpt-4.1",
+                temperature=0.2,
+                response_format={"type": "json_object"},
+                messages=[
+                    {"role": "system", "content": system_prompt(req.language)},
+                    {
+                        "role": "user",
+                        "content": "Refaça garantindo que TODOS os temas tenham no mínimo 5 iniciativas."
+                    }
+                ]
+            )
+
+            payload = extract_json(retry.choices[0].message.content)
+            payload = fix_payload(payload)
+
+        return payload
+
+    except ValidationError as e:
         raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.post("/generate-strategy-mapping")
-def strategy_mapping(payload: StrategyMappingInput):
-    try:
-        return generate_strategy_mapping(payload)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.post("/generate-strategy-review")
-def strategy_review(payload: StrategyReviewInput):
-    try:
-        return generate_strategy_review(payload)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-# =========================================================
-# CONSOLIDATED ENDPOINT
-# =========================================================
-@app.post("/run-strategy-analysis", response_model=FullStrategyAnalysisResponse)
-def run_strategy_analysis(payload: StrategyInput):
-    try:
-        return run_full_strategy_analysis(payload)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
