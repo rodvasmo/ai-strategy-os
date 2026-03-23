@@ -4,11 +4,11 @@ import re
 from typing import List, Optional
 
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, ValidationError
 from openai import OpenAI
 
 app = FastAPI()
-from fastapi.middleware.cors import CORSMiddleware
 
 app.add_middleware(
     CORSMiddleware,
@@ -29,6 +29,7 @@ class Initiative(BaseModel):
     description: str
     type: str
 
+
 class Theme(BaseModel):
     id: int
     title: str
@@ -36,27 +37,20 @@ class Theme(BaseModel):
     outcomes: List[str] = Field(..., min_items=3, max_items=3)
     initiatives: List[Initiative] = Field(..., min_items=5, max_items=8)
 
+
 class StrategyResponse(BaseModel):
     themes: List[Theme] = Field(..., min_items=3, max_items=5)
 
-from pydantic import BaseModel, model_validator
 
 class StrategyRequest(BaseModel):
-    company_name: str
-    sector: str
-    context: str
+    company_name: Optional[str] = None
+    sector: Optional[str] = None
+    context: Optional[str] = None
     ambition: Optional[str] = None
     objective: Optional[str] = None
     constraints: Optional[str] = ""
     language: Optional[str] = "pt-BR"
 
-    @model_validator(mode="after")
-    def fill_ambition(self):
-        if not self.ambition and self.objective:
-            self.ambition = self.objective
-        if not self.ambition:
-            raise ValueError("ambition or objective is required")
-        return self
 
 # =========================
 # PROMPTS
@@ -106,16 +100,24 @@ Formato obrigatório:
 }}
 """.strip()
 
+
 def user_prompt(req: StrategyRequest):
+    company_name = req.company_name or "Empresa não informada"
+    sector = req.sector or "Setor não informado"
+    context = req.context or "Contexto não informado"
+    ambition = req.ambition or req.objective or "Ambição não informada"
+    constraints = req.constraints or "Sem restrições adicionais"
+
     return f"""
-Empresa: {req.company_name}
-Setor: {req.sector}
-Contexto: {req.context}
-Ambição: {req.ambition}
-Restrições: {req.constraints}
+Empresa: {company_name}
+Setor: {sector}
+Contexto: {context}
+Ambição: {ambition}
+Restrições: {constraints}
 
 Gere a estratégia completa.
 """.strip()
+
 
 # =========================
 # HELPERS
@@ -124,28 +126,25 @@ Gere a estratégia completa.
 def extract_json(text: str):
     try:
         return json.loads(text)
-    except:
+    except Exception:
         match = re.search(r"\{.*\}", text, re.DOTALL)
         if match:
             return json.loads(match.group(0))
         raise ValueError("JSON inválido")
 
+
 def fix_payload(payload: dict):
     """
     Corrige erros comuns do LLM
     """
-
     themes = payload.get("themes", [])
 
     for i, t in enumerate(themes):
-        # garantir ID
         t["id"] = t.get("id") or (i + 1)
 
-        # garantir outcomes
         if len(t.get("outcomes", [])) < 3:
             t["outcomes"] = (t.get("outcomes", []) + ["placeholder"] * 3)[:3]
 
-        # normalizar initiatives
         initiatives = (
             t.get("initiatives")
             or t.get("actions")
@@ -173,6 +172,7 @@ def fix_payload(payload: dict):
 
     return payload
 
+
 def needs_regeneration(payload: dict):
     themes = payload.get("themes", [])
 
@@ -185,20 +185,25 @@ def needs_regeneration(payload: dict):
 
     return False
 
+
 # =========================
 # ENDPOINT
 # =========================
 
+@app.get("/")
+def health():
+    return {"status": "ok"}
+
+
 @app.post("/generate-strategy-framing", response_model=StrategyResponse)
 def generate_strategy(req: StrategyRequest):
     try:
-        # chamada principal
         response = client.chat.completions.create(
             model="gpt-4.1",
             temperature=0.2,
             response_format={"type": "json_object"},
             messages=[
-                {"role": "system", "content": system_prompt(req.language)},
+                {"role": "system", "content": system_prompt(req.language or "pt-BR")},
                 {"role": "user", "content": user_prompt(req)}
             ]
         )
@@ -207,17 +212,16 @@ def generate_strategy(req: StrategyRequest):
         payload = extract_json(content)
         payload = fix_payload(payload)
 
-        # retry automático se incompleto
         if needs_regeneration(payload):
             retry = client.chat.completions.create(
                 model="gpt-4.1",
                 temperature=0.2,
                 response_format={"type": "json_object"},
                 messages=[
-                    {"role": "system", "content": system_prompt(req.language)},
+                    {"role": "system", "content": system_prompt(req.language or "pt-BR")},
                     {
                         "role": "user",
-                        "content": "Refaça garantindo que TODOS os temas tenham no mínimo 5 iniciativas."
+                        "content": user_prompt(req) + "\n\nRefaça garantindo que TODOS os temas tenham no mínimo 5 iniciativas."
                     }
                 ]
             )
