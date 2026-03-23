@@ -39,13 +39,24 @@ class Theme(BaseModel):
 class StrategyResponse(BaseModel):
     themes: List[Theme] = Field(..., min_items=3, max_items=5)
 
+from pydantic import BaseModel, model_validator
+
 class StrategyRequest(BaseModel):
     company_name: str
     sector: str
     context: str
-    ambition: str
+    ambition: Optional[str] = None
+    objective: Optional[str] = None
     constraints: Optional[str] = ""
     language: Optional[str] = "pt-BR"
+
+    @model_validator(mode="after")
+    def fill_ambition(self):
+        if not self.ambition and self.objective:
+            self.ambition = self.objective
+        if not self.ambition:
+            raise ValueError("ambition or objective is required")
+        return self
 
 # =========================
 # PROMPTS
