@@ -13,6 +13,72 @@ def _clean_text(value: Optional[str]) -> str:
     return (value or "").strip()
 
 
+def _serialize_guardrails(guardrails: Any) -> str:
+    if not guardrails:
+        return ""
+
+    serialized = []
+    for item in guardrails:
+        if not isinstance(item, dict):
+            try:
+                item = item.model_dump()
+            except Exception:
+                continue
+
+        name = str(item.get("name", "")).strip()
+        category = str(item.get("category", "")).strip()
+        description = str(item.get("description", "")).strip()
+        metric_name = str(item.get("metric_name", "")).strip()
+        operator = str(item.get("operator", "")).strip()
+        target_value = str(item.get("target_value", "")).strip()
+        target_unit = str(item.get("target_unit", "")).strip()
+        priority = str(item.get("priority", "")).strip()
+        owner = str(item.get("owner", "")).strip()
+        rationale = str(item.get("rationale", "")).strip()
+        status = str(item.get("status", "")).strip()
+
+        lines = []
+        if name:
+            lines.append(f"Nome: {name}")
+        if category:
+            lines.append(f"Categoria: {category}")
+        if description:
+            lines.append(f"Descrição: {description}")
+        if metric_name:
+            lines.append(f"Métrica associada: {metric_name}")
+        if operator or target_value or target_unit:
+            rule_text = f"{operator} {target_value or ''} {target_unit or ''}".strip()
+            lines.append(f"Regra: {rule_text}")
+        if priority:
+            lines.append(f"Prioridade: {priority}")
+        if owner:
+            lines.append(f"Owner: {owner}")
+        if rationale:
+            lines.append(f"Racional: {rationale}")
+        if status:
+            lines.append(f"Status: {status}")
+
+        if lines:
+            serialized.append("- " + " | ".join(lines))
+
+    return "\n".join(serialized)
+
+
+def build_guardrails_context(payload: Any) -> str:
+    sections = []
+
+    structured = getattr(payload, "performance_constraints", []) or []
+    serialized_guardrails = _serialize_guardrails(structured)
+    if serialized_guardrails:
+        sections.append(f"[PERFORMANCE CONSTRAINTS - STRUCTURED]\n{serialized_guardrails}")
+
+    free_text = _clean_text(getattr(payload, "performance_constraints_text", None))
+    if free_text:
+        sections.append(f"[PERFORMANCE CONSTRAINTS - FREE TEXT]\n{free_text}")
+
+    return "\n\n".join(sections)
+
+
 def build_strategy_context(payload: Any) -> str:
     sections = []
 
@@ -52,8 +118,9 @@ def build_strategy_context(payload: Any) -> str:
     if _clean_text(getattr(payload, "customer_research_text", None)):
         sections.append(f"[CUSTOMER RESEARCH]\n{payload.customer_research_text}")
 
-    if _clean_text(getattr(payload, "performance_constraints_text", None)):
-        sections.append(f"[PERFORMANCE CONSTRAINTS]\n{payload.performance_constraints_text}")
+    guardrails_block = build_guardrails_context(payload)
+    if guardrails_block:
+        sections.append(guardrails_block)
 
     return "\n\n".join(sections)
 

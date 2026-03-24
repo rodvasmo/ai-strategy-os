@@ -33,6 +33,15 @@ Sua tarefa:
 
 5. Ser duro com ambiguidades.
 
+6. Se houver performance constraints / guardrails, incorporá-los:
+- nos constraints dos temas
+- nas contradições
+- na lógica econômica
+- nos trade-offs
+- sem transformar guardrails em temas independentes
+- sem repetir todos os guardrails em todos os temas
+- distribuir os guardrails de forma inteligente e coerente
+
 Regras:
 - responder em português
 - não usar markdown

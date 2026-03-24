@@ -33,7 +33,7 @@ REGRAS PARA OUTCOMES:
 - target deve sempre ser string
 - O outcome deve representar resultado de negócio, não atividade
 - Evite outcomes vagos como “melhorar estratégia” ou “evoluir operação”
-- Outcomes devem ser coerentes com o contexto da empresa e com o framing
+- Outcomes devem ser coerentes com o contexto da empresa, com o framing e com os guardrails
 
 REGRAS PARA KPIs:
 - Gere KPIs suficientes para sustentar os outcomes e iniciativas
@@ -88,6 +88,7 @@ REGRAS DE GROUNDING:
   - novas geografias
   - unidades de negócio inexistentes
   - temas não citados
+- Se houver guardrails estruturados, as iniciativas e outcomes devem respeitá-los
 - Se faltar detalhe, complete de forma conservadora e plausível
 - Em caso de dúvida, prefira simplicidade e aderência ao material
 

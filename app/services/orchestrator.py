@@ -564,6 +564,25 @@ def ensure_mapping_balance(mapping_data: dict, framing_data: dict) -> dict:
     return mapping_data
 
 
+def generate_guardrail_summary(constraints):
+    if not constraints:
+        return {"summary": "Nenhum guardrail informado", "guardrails": []}
+
+    return {
+        "summary": f"{len(constraints)} guardrails definidos",
+        "guardrails": [
+            {
+                "name": g.name,
+                "category": g.category,
+                "priority": g.priority,
+                "rule": f"{g.operator} {g.target_value or ''} {g.target_unit or ''}".strip(),
+                "owner": g.owner,
+            }
+            for g in constraints
+        ],
+    }
+
+
 # =========================================================
 # EXECUTIVE SUMMARY
 # =========================================================
@@ -622,9 +641,11 @@ def generate_strategy_framing(payload: StrategyInput):
     base_context = build_strategy_context(payload)
 
     framing_user_prompt = f"""
-Analise os materiais estratégicos abaixo e construa o framing estratégico.
+Construa o framing estratégico considerando os materiais abaixo.
 
-Retorne apenas JSON válido e compacto.
+IMPORTANTE:
+- A estratégia deve respeitar explicitamente os guardrails de performance.
+- Use os guardrails para definir trade-offs e constraints reais.
 
 Materiais:
 {base_context}
@@ -646,7 +667,9 @@ def generate_strategy_mapping(payload: StrategyMappingInput):
     mapping_user_prompt = f"""
 Construa o modelo executável da estratégia.
 
-Retorne apenas JSON válido e compacto.
+IMPORTANTE:
+- Todas as iniciativas devem respeitar os guardrails.
+- Evite iniciativas que violem EBITDA, CAC, headcount ou constraints críticos.
 
 Framing estratégico:
 {json.dumps(framing, ensure_ascii=False)}
@@ -732,6 +755,8 @@ Portfolio:
         "narrative": narrative.model_dump(),
     }
 
+    review_result["guardrails"] = generate_guardrail_summary(payload.performance_constraints or [])
+
     score = calculate_strategy_score(
         core_result={
             "framing": framing,
@@ -767,6 +792,7 @@ def run_full_strategy_analysis(payload: StrategyInput):
         market_benchmarks_text=payload.market_benchmarks_text,
         customer_research_text=payload.customer_research_text,
         performance_constraints_text=payload.performance_constraints_text,
+        performance_constraints=payload.performance_constraints,
     )
 
     mapping_result = generate_strategy_mapping(mapping_payload)
@@ -775,6 +801,7 @@ def run_full_strategy_analysis(payload: StrategyInput):
     review_payload = StrategyReviewInput(
         framing=framing,
         mapping=mapping,
+        performance_constraints=payload.performance_constraints,
     )
 
     review_result = generate_strategy_review(review_payload)
@@ -792,6 +819,7 @@ def run_full_strategy_analysis(payload: StrategyInput):
         "kpi_integrity": review_result["kpi_integrity"],
         "portfolio": review_result["portfolio"],
         "narrative": review_result["narrative"],
+        "guardrails": review_result["guardrails"],
         "strategy_score": review_result["strategy_score"],
         "executive_summary": executive_summary,
     }

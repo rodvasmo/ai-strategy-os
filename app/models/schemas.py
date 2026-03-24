@@ -1,6 +1,55 @@
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Literal
 
 from pydantic import BaseModel, Field
+
+
+# =========================================================
+# GUARDRAILS
+# =========================================================
+GuardrailCategory = Literal[
+    "financeiro",
+    "comercial",
+    "cliente",
+    "pessoas",
+    "operacional",
+    "governanca",
+]
+
+GuardrailOperator = Literal[
+    ">=",
+    "<=",
+    "==",
+    "between",
+    "text_rule",
+]
+
+GuardrailPriority = Literal[
+    "critico",
+    "alto",
+    "medio",
+]
+
+GuardrailStatus = Literal[
+    "ativo",
+    "inativo",
+]
+
+
+class Guardrail(BaseModel):
+    id: Optional[str] = None
+    name: str
+    category: GuardrailCategory
+    description: str
+    metric_name: Optional[str] = None
+    operator: GuardrailOperator = "text_rule"
+    target_value: Optional[str] = None
+    target_unit: Optional[str] = None
+    priority: GuardrailPriority = "medio"
+    owner: Optional[str] = None
+    scope: str = "empresa"
+    source: str = "manual"
+    rationale: Optional[str] = None
+    status: GuardrailStatus = "ativo"
 
 
 # =========================================================
@@ -10,7 +59,7 @@ class StrategyInput(BaseModel):
     company_name: Optional[str] = None
     company_context: str = Field(
         ...,
-        description="Contexto geral da empresa e do problema estratégico"
+        description="Contexto geral da empresa e do problema estratégico",
     )
     annual_plan_text: Optional[str] = None
     financial_model_text: Optional[str] = None
@@ -22,7 +71,12 @@ class StrategyInput(BaseModel):
     competitor_landscape_text: Optional[str] = None
     market_benchmarks_text: Optional[str] = None
     customer_research_text: Optional[str] = None
+
+    # Compatibilidade com a versão simples
     performance_constraints_text: Optional[str] = None
+
+    # Nova versão estruturada
+    performance_constraints: List[Guardrail] = Field(default_factory=list)
 
 
 class StrategyMappingInput(BaseModel):
@@ -39,12 +93,18 @@ class StrategyMappingInput(BaseModel):
     competitor_landscape_text: Optional[str] = None
     market_benchmarks_text: Optional[str] = None
     customer_research_text: Optional[str] = None
+
+    # Compatibilidade com a versão simples
     performance_constraints_text: Optional[str] = None
+
+    # Nova versão estruturada
+    performance_constraints: List[Guardrail] = Field(default_factory=list)
 
 
 class StrategyReviewInput(BaseModel):
     framing: Dict[str, Any]
     mapping: Dict[str, Any]
+    performance_constraints: List[Guardrail] = Field(default_factory=list)
 
 
 # =========================================================
