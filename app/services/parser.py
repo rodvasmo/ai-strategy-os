@@ -52,6 +52,9 @@ def build_strategy_context(payload: Any) -> str:
     if _clean_text(getattr(payload, "customer_research_text", None)):
         sections.append(f"[CUSTOMER RESEARCH]\n{payload.customer_research_text}")
 
+    if _clean_text(getattr(payload, "performance_constraints_text", None)):
+        sections.append(f"[PERFORMANCE CONSTRAINTS]\n{payload.performance_constraints_text}")
+
     return "\n\n".join(sections)
 
 
@@ -64,7 +67,6 @@ async def extract_text_from_upload(upload: UploadFile) -> str:
     filename = (upload.filename or "").lower()
     content_type = (upload.content_type or "").lower()
 
-    # text-like files
     if (
         filename.endswith(".txt")
         or filename.endswith(".md")
@@ -81,7 +83,6 @@ async def extract_text_from_upload(upload: UploadFile) -> str:
         except Exception:
             return content.decode("latin-1", errors="ignore")
 
-    # pdf
     if filename.endswith(".pdf") or content_type == "application/pdf":
         try:
             from pypdf import PdfReader  # type: ignore
@@ -98,7 +99,6 @@ async def extract_text_from_upload(upload: UploadFile) -> str:
 
         return content.decode("utf-8", errors="ignore")
 
-    # docx
     if filename.endswith(".docx"):
         try:
             with zipfile.ZipFile(io.BytesIO(content)) as z:

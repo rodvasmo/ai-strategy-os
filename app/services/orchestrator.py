@@ -505,7 +505,6 @@ def ensure_mapping_balance(mapping_data: dict, framing_data: dict) -> dict:
     theme_names = [t.get("name", "").strip() for t in strategic_themes if str(t.get("name", "")).strip()]
     theme_name_set = set(theme_names)
 
-    # outcomes by theme
     outcomes = mapping_data.get("outcomes", [])
     outcomes_by_theme = defaultdict(list)
     for outcome in outcomes:
@@ -513,7 +512,6 @@ def ensure_mapping_balance(mapping_data: dict, framing_data: dict) -> dict:
         if linked_theme:
             outcomes_by_theme[linked_theme].append(outcome)
 
-    # sanitize initiatives
     initiatives = []
     for item in mapping_data.get("initiatives", []):
         linked_theme = str(item.get("linked_theme", "")).strip()
@@ -541,7 +539,6 @@ def ensure_mapping_balance(mapping_data: dict, framing_data: dict) -> dict:
     for initiative in initiatives:
         initiatives_by_theme[initiative["linked_theme"]].append(initiative)
 
-    # guarantee at least 2 initiatives per theme
     for theme in strategic_themes:
         theme_name = str(theme.get("name", "")).strip()
         current = initiatives_by_theme.get(theme_name, [])
@@ -559,7 +556,6 @@ def ensure_mapping_balance(mapping_data: dict, framing_data: dict) -> dict:
 
             initiatives_by_theme[theme_name] = current
 
-    # flatten with balanced ordering by theme
     balanced_initiatives = []
     for theme_name in theme_names:
         balanced_initiatives.extend(initiatives_by_theme.get(theme_name, [])[:4])
@@ -770,6 +766,7 @@ def run_full_strategy_analysis(payload: StrategyInput):
         competitor_landscape_text=payload.competitor_landscape_text,
         market_benchmarks_text=payload.market_benchmarks_text,
         customer_research_text=payload.customer_research_text,
+        performance_constraints_text=payload.performance_constraints_text,
     )
 
     mapping_result = generate_strategy_mapping(mapping_payload)

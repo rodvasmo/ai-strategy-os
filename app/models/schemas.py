@@ -22,6 +22,7 @@ class StrategyInput(BaseModel):
     competitor_landscape_text: Optional[str] = None
     market_benchmarks_text: Optional[str] = None
     customer_research_text: Optional[str] = None
+    performance_constraints_text: Optional[str] = None
 
 
 class StrategyMappingInput(BaseModel):
@@ -38,6 +39,7 @@ class StrategyMappingInput(BaseModel):
     competitor_landscape_text: Optional[str] = None
     market_benchmarks_text: Optional[str] = None
     customer_research_text: Optional[str] = None
+    performance_constraints_text: Optional[str] = None
 
 
 class StrategyReviewInput(BaseModel):
