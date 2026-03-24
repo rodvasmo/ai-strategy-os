@@ -15,7 +15,7 @@ Sua tarefa:
 - not_doing
 - constraints
 3. Extrair assumptions.
-4. Identificar contradictions.
+4. Identicar contradictions.
 
 Se houver performance constraints / guardrails:
 - incorporá-los nos constraints, tradeoffs e contradições
@@ -46,6 +46,35 @@ Limites de concisão:
 - constraints: no máximo 2 itens curtos por tema
 - assumptions: no máximo 4 itens
 - contradictions: no máximo 4 itens
+
+REGRAS CRÍTICAS DE QUALIDADE DOS TEMAS:
+1. NÃO pode haver sobreposição entre temas.
+- Cada tema deve representar uma alavanca estratégica distinta.
+- Evitar repetir eixos como "eficiência", "digital", "experiência" em múltiplos temas.
+
+2. Priorizar temas com impacto econômico direto.
+- Pelo menos 3 dos 4 temas devem impactar diretamente:
+  - EBITDA
+  - Receita
+  - Churn
+  - Capital de giro
+- Evitar temas "soft" como branding, comunidade ou experiência isolada sem conexão econômica clara.
+
+3. Se houver redundância, consolidar temas.
+- Exemplo: "eficiência operacional" e "gestão de estoque" devem virar um único tema.
+
+4. Cada tema deve responder implicitamente:
+- Como isso melhora EBITDA ou geração de caixa?
+- Qual métrica concreta é impactada?
+
+5. Se necessário, substituir temas fracos por temas mais duros como:
+- crescimento rentável
+- disciplina de CAC
+- expansão de receita
+- eficiência de capital
+
+6. NÃO criar temas apenas para completar 4 itens.
+- Se houver um tema fraco, substitua por um mais relevante economicamente.
 
 Formato:
 {
