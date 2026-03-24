@@ -434,6 +434,70 @@ def _build_default_initiatives_for_theme(theme: dict, outcomes_by_theme: dict) -
     return defaults
 
 
+def rebuild_strategy_graph(mapping_data: dict) -> dict:
+    kpis = mapping_data.get("kpis", [])
+    initiatives = mapping_data.get("initiatives", [])
+
+    leading_kpis = [k for k in kpis if str(k.get("type", "")).lower() == "leading"]
+    lagging_kpis = [k for k in kpis if str(k.get("type", "")).lower() == "lagging"]
+
+    def pick_leading(initiative_name: str, theme_name: str) -> str:
+        text = f"{initiative_name} {theme_name}".lower()
+
+        keyword_sets = [
+            ["cac", "convers", "digital", "crm", "campanha", "autom"],
+            ["engaj", "comunidade", "evento", "conteúdo", "fidel"],
+            ["estoque", "giro", "supply", "mix", "compras", "fornecedor"],
+            ["clube", "assin", "reten", "churn"],
+        ]
+
+        for keywords in keyword_sets:
+            for kpi in leading_kpis:
+                kname = str(kpi.get("name", "")).lower()
+                if any(word in text and word in kname for word in keywords):
+                    return kpi["name"]
+
+        return leading_kpis[0]["name"] if leading_kpis else ""
+
+    def pick_lagging(outcome_name: str, theme_name: str) -> str:
+        text = f"{outcome_name} {theme_name}".lower()
+
+        for kpi in lagging_kpis:
+            kname = str(kpi.get("name", "")).lower()
+            if "mrr" in text and "mrr" in kname:
+                return kpi["name"]
+            if "churn" in text and "churn" in kname:
+                return kpi["name"]
+            if "estoque" in text and ("estoque" in kname or "dias de estoque" in kname):
+                return kpi["name"]
+            if "nps" in text and "nps" in kname:
+                return kpi["name"]
+            if "receita" in text and ("receita" in kname or "assinantes" in kname):
+                return kpi["name"]
+
+        return lagging_kpis[0]["name"] if lagging_kpis else ""
+
+    strategy_graph = {}
+
+    for initiative in initiatives:
+        initiative_name = initiative.get("name", "")
+        theme_name = initiative.get("linked_theme", "")
+        outcome_name = initiative.get("linked_outcome", "")
+
+        kpi_leading = pick_leading(initiative_name, theme_name)
+        kpi_lagging = pick_lagging(outcome_name, theme_name)
+
+        strategy_graph[initiative_name] = {
+            "kpi_leading": kpi_leading,
+            "kpi_lagging": kpi_lagging,
+            "outcome": outcome_name,
+            "causal_logic": f"A iniciativa '{initiative_name}' melhora '{kpi_leading}' e contribui para '{outcome_name}'."
+        }
+
+    mapping_data["strategy_graph"] = strategy_graph
+    return mapping_data
+
+
 def ensure_mapping_balance(mapping_data: dict, framing_data: dict) -> dict:
     mapping_data = normalize_mapping(mapping_data)
     strategic_themes = framing_data.get("strategic_themes", [])
@@ -501,26 +565,6 @@ def ensure_mapping_balance(mapping_data: dict, framing_data: dict) -> dict:
         balanced_initiatives.extend(initiatives_by_theme.get(theme_name, [])[:4])
 
     mapping_data["initiatives"] = balanced_initiatives
-
-    # rebuild strategy graph with full coverage
-    kpis = mapping_data.get("kpis", [])
-    strategy_graph = {}
-
-    for initiative in mapping_data["initiatives"]:
-        theme_name = initiative["linked_theme"]
-        outcome_name = initiative["linked_outcome"]
-
-        kpi_leading = _pick_leading_kpi_for_theme(kpis, theme_name)
-        kpi_lagging = _pick_lagging_kpi_for_theme(kpis, outcome_name, theme_name)
-
-        strategy_graph[initiative["name"]] = {
-            "kpi_leading": kpi_leading,
-            "kpi_lagging": kpi_lagging,
-            "outcome": outcome_name,
-            "causal_logic": f"A iniciativa atua no tema '{theme_name}', melhora '{kpi_leading}' e contribui para o outcome '{outcome_name}' por meio de execução disciplinada.",
-        }
-
-    mapping_data["strategy_graph"] = strategy_graph
     return mapping_data
 
 
@@ -617,6 +661,7 @@ Materiais originais:
     mapping_data = call_llm_json(MAPPING_PROMPT, mapping_user_prompt)
     mapping_data = normalize_mapping(mapping_data)
     mapping_data = ensure_mapping_balance(mapping_data, framing)
+    mapping_data = rebuild_strategy_graph(mapping_data)
     mapping = MappingOutput(**mapping_data)
 
     return {
