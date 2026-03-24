@@ -27,39 +27,18 @@ def _serialize_guardrails(guardrails: Any) -> str:
 
         name = str(item.get("name", "")).strip()
         category = str(item.get("category", "")).strip()
-        description = str(item.get("description", "")).strip()
-        metric_name = str(item.get("metric_name", "")).strip()
         operator = str(item.get("operator", "")).strip()
         target_value = str(item.get("target_value", "")).strip()
         target_unit = str(item.get("target_unit", "")).strip()
         priority = str(item.get("priority", "")).strip()
-        owner = str(item.get("owner", "")).strip()
-        rationale = str(item.get("rationale", "")).strip()
-        status = str(item.get("status", "")).strip()
 
-        lines = []
-        if name:
-            lines.append(f"Nome: {name}")
-        if category:
-            lines.append(f"Categoria: {category}")
-        if description:
-            lines.append(f"Descrição: {description}")
-        if metric_name:
-            lines.append(f"Métrica associada: {metric_name}")
-        if operator or target_value or target_unit:
-            rule_text = f"{operator} {target_value or ''} {target_unit or ''}".strip()
-            lines.append(f"Regra: {rule_text}")
-        if priority:
-            lines.append(f"Prioridade: {priority}")
-        if owner:
-            lines.append(f"Owner: {owner}")
-        if rationale:
-            lines.append(f"Racional: {rationale}")
-        if status:
-            lines.append(f"Status: {status}")
+        if not name:
+            continue
 
-        if lines:
-            serialized.append("- " + " | ".join(lines))
+        rule_text = f"{operator} {target_value or ''} {target_unit or ''}".strip()
+        serialized.append(
+            f"- {name} | categoria: {category} | regra: {rule_text} | prioridade: {priority}"
+        )
 
     return "\n".join(serialized)
 
@@ -69,12 +48,40 @@ def build_guardrails_context(payload: Any) -> str:
 
     structured = getattr(payload, "performance_constraints", []) or []
     serialized_guardrails = _serialize_guardrails(structured)
+
+    # Se houver guardrails estruturados, ignorar o texto livre para evitar duplicidade
     if serialized_guardrails:
-        sections.append(f"[PERFORMANCE CONSTRAINTS - STRUCTURED]\n{serialized_guardrails}")
+        sections.append(f"[PERFORMANCE CONSTRAINTS]\n{serialized_guardrails}")
+        return "\n\n".join(sections)
 
     free_text = _clean_text(getattr(payload, "performance_constraints_text", None))
     if free_text:
-        sections.append(f"[PERFORMANCE CONSTRAINTS - FREE TEXT]\n{free_text}")
+        sections.append(f"[PERFORMANCE CONSTRAINTS]\n{free_text}")
+
+    return "\n\n".join(sections)
+
+
+def build_framing_context(payload: Any) -> str:
+    sections = []
+
+    if _clean_text(getattr(payload, "company_name", None)):
+        sections.append(f"[COMPANY NAME]\n{payload.company_name}")
+
+    if _clean_text(getattr(payload, "company_context", None)):
+        sections.append(f"[COMPANY CONTEXT]\n{payload.company_context}")
+
+    if _clean_text(getattr(payload, "annual_plan_text", None)):
+        sections.append(f"[ANNUAL PLAN]\n{payload.annual_plan_text}")
+
+    if _clean_text(getattr(payload, "financial_model_text", None)):
+        sections.append(f"[FINANCIAL MODEL]\n{payload.financial_model_text}")
+
+    if _clean_text(getattr(payload, "leadership_notes_text", None)):
+        sections.append(f"[LEADERSHIP NOTES]\n{payload.leadership_notes_text}")
+
+    guardrails_block = build_guardrails_context(payload)
+    if guardrails_block:
+        sections.append(guardrails_block)
 
     return "\n\n".join(sections)
 

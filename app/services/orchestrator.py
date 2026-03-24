@@ -13,6 +13,7 @@ from app.models.schemas import (
     NarrativeOutput,
 )
 from app.services.parser import (
+    build_framing_context,
     build_strategy_context,
     build_strategy_context_from_mapping_input,
 )
@@ -156,13 +157,13 @@ def enrich_framing_if_incomplete(framing_data: dict, base_context: str) -> dict:
         return framing_data
 
     repair_system_prompt = """
-Você é um estrategista sênior e deve COMPLETAR um framing estratégico incompleto.
+Você é um estrategista sênior e deve completar um framing estratégico incompleto.
 
-Regras obrigatórias:
-- strategic_themes deve ser LISTA
-- assumptions deve ser LISTA de strings com no mínimo 3 itens
-- contradictions deve ser LISTA de strings com no mínimo 2 itens
-- cada theme deve conter:
+Regras:
+- strategic_themes deve ser lista
+- assumptions deve ter no mínimo 3 itens
+- contradictions deve ter no mínimo 2 itens
+- cada tema deve conter:
   - name
   - description
   - where_to_play
@@ -173,7 +174,7 @@ Regras obrigatórias:
   - constraints
 
 Preserve o que estiver bom.
-Complete o que estiver faltando.
+Complete só o que estiver faltando.
 Retorne apenas JSON válido.
 """
 
@@ -638,7 +639,7 @@ def build_executive_summary(
 # INDIVIDUAL GENERATORS
 # =========================================================
 def generate_strategy_framing(payload: StrategyInput):
-    base_context = build_strategy_context(payload)
+    base_context = build_framing_context(payload)
 
     framing_user_prompt = f"""
 Construa o framing estratégico considerando os materiais abaixo.
