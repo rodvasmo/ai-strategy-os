@@ -35,10 +35,12 @@ def _serialize_guardrails(guardrails: Any) -> str:
         if not name:
             continue
 
-        rule_text = f"{operator} {target_value or ''} {target_unit or ''}".strip()
-        serialized.append(
-            f"- {name} | categoria: {category} | regra: {rule_text} | prioridade: {priority}"
-        )
+        rule = f"{operator} {target_value} {target_unit}".strip()
+        line = f"- {name} | {category} | {rule}"
+        if priority:
+            line += f" | prioridade: {priority}"
+
+        serialized.append(line)
 
     return "\n".join(serialized)
 
