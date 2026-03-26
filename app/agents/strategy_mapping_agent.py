@@ -70,6 +70,20 @@ REGRAS PARA INITIATIVES:
   - em execução
   - concluído
 
+  REGRA CRÍTICA DE CONCRETUDE DAS INICIATIVAS:
+
+- O nome da iniciativa deve obrigatoriamente conter:
+- uma ação clara (implantar, lançar, redesenhar, criar, automatizar, revisar)
+- o objeto da ação (programa, CRM, mix de SKUs, jornada, modelo de preços, etc.)
+- o mecanismo principal de impacto (segmentação, tiers, personalização, dados, curadoria, etc.)
+- Se a iniciativa puder ser interpretada como um título genérico de apresentação, ela está errada e deve ser reescrita.
+- Evite qualquer iniciativa que comece com:
+- “Lançar iniciativas…”
+- “Fortalecer…”
+- “Melhorar…”
+- “Evoluir…”
+- Substitua por algo operacional e específico
+
 REGRAS DE QUALIDADE DAS INITIATIVES:
 - Cada iniciativa deve ser concreta, específica e executável
 - A iniciativa deve descrever algo que um time realmente consiga implementar
