@@ -22,7 +22,7 @@ REGRAS DE COBERTURA DOS TEMAS:
 - Gere no mínimo 2 iniciativas por tema
 - Idealmente entre 2 e 4 iniciativas por tema
 - Distribua as iniciativas de forma equilibrada entre os temas
-- Evite concentrar quase todas as iniciativas em um único tema
+- Evite concentração em um único tema
 
 REGRAS PARA OUTCOMES:
 - Gere pelo menos 1 outcome por tema
@@ -30,13 +30,12 @@ REGRAS PARA OUTCOMES:
   - name
   - linked_theme
   - target
-- target deve sempre ser string
-- O outcome deve representar resultado de negócio, não atividade
-- Evite outcomes vagos como “melhorar estratégia” ou “evoluir operação”
-- Outcomes devem ser coerentes com o contexto da empresa, com o framing e com os guardrails
+- O outcome deve representar resultado de negócio (não atividade)
+- Evite termos vagos
+- Deve ser mensurável e conectado a valor econômico (receita, churn, margem, capital, produtividade)
 
 REGRAS PARA KPIs:
-- Gere KPIs suficientes para sustentar os outcomes e iniciativas
+- Gere KPIs suficientes para sustentar outcomes e iniciativas
 - Cada KPI deve ter:
   - name
   - type (leading ou lagging)
@@ -44,11 +43,9 @@ REGRAS PARA KPIs:
   - owner
   - formula
   - source
-- target deve sempre ser string
 - Deve haver KPIs leading e lagging
-- KPIs devem ser mensuráveis e executáveis
-- Não invente geografias, mercados, produtos, unidades de negócio ou canais que não estejam no material de entrada
-- Não introduza países, regiões ou frentes não mencionadas explicitamente no contexto original
+- KPIs devem ser acionáveis (time consegue influenciar diretamente)
+- Não inventar contexto fora do input
 
 REGRAS PARA INITIATIVES:
 - Cada iniciativa deve ter:
@@ -60,105 +57,121 @@ REGRAS PARA INITIATIVES:
   - time_horizon
   - owner
   - status
-- Não deixar campos nulos
-- linked_theme deve bater exatamente com um strategic_theme.name do framing
-- linked_outcome deve bater exatamente com um outcome.name já gerado
-- expected_kpi_delta deve ser frase curta e plausível
-- time_horizon deve ser algo como “3 meses”, “6 meses”, “12 meses”
-- status deve ser uma destas strings:
+
+- status deve ser:
   - planejado
   - em execução
   - concluído
 
-  REGRA CRÍTICA DE CONCRETUDE DAS INICIATIVAS:
+----------------------------------------
+REGRA CRÍTICA DE CONCRETUDE (BLOQUEIO)
+----------------------------------------
 
-- O nome da iniciativa deve obrigatoriamente conter:
-- uma ação clara (implantar, lançar, redesenhar, criar, automatizar, revisar)
-- o objeto da ação (programa, CRM, mix de SKUs, jornada, modelo de preços, etc.)
-- o mecanismo principal de impacto (segmentação, tiers, personalização, dados, curadoria, etc.)
-- Se a iniciativa puder ser interpretada como um título genérico de apresentação, ela está errada e deve ser reescrita.
-- Evite qualquer iniciativa que comece com:
-- “Lançar iniciativas…”
-- “Fortalecer…”
-- “Melhorar…”
-- “Evoluir…”
-- Substitua por algo operacional e específico
+É PROIBIDO gerar iniciativas genéricas.
 
-REGRAS DE QUALIDADE DAS INITIATIVES:
-- Cada iniciativa deve ser concreta, específica e executável
-- A iniciativa deve descrever algo que um time realmente consiga implementar
-- Evite nomes vagos ou genéricos como:
-  - “melhorar experiência”
-  - “fortalecer transformação”
-  - “evoluir operação”
-  - “lançar iniciativas de produto”
-  - “implementar jornada operacional”
-  - “aprimorar eficiência”
-- O nome da iniciativa deve indicar claramente a ação principal
-- Sempre que possível, explicite no nome:
-  - o que será implantado, criado, revisado, lançado ou redesenhado
-  - para qual processo, cliente, canal, tema ou alavanca de valor
-- A iniciativa deve refletir uma alavanca clara de negócio, como:
-  - aquisição
-  - retenção
-  - ticket médio
-  - margem
-  - EBITDA
-  - capital de giro
-  - estoque
-  - produtividade comercial
-  - personalização
-  - CRM
-  - curadoria
-  - fidelização
-  - mix de produtos
-- expected_impact deve explicar a mudança de negócio gerada pela iniciativa
-- expected_kpi_delta deve explicar, de forma curta, o efeito esperado nos KPIs
-- Evite iniciativas abstratas que pareçam apenas títulos de workstream
-- Evite placeholders genéricos produzidos por IA
-- Cada iniciativa deve parecer algo que um executivo poderia aprovar e cobrar execução
-- Não misture níveis demais:
-  - evitar iniciativa excessivamente ampla e difusa
-  - evitar iniciativa que seja só um slogan estratégico
-  - evitar iniciativa que seja apenas rotina operacional muito micro
-- Prefira iniciativas em nível tático-executivo, claras o suficiente para orientar execução
+Nunca usar:
+- “lançar iniciativas”
+- “fortalecer”
+- “melhorar”
+- “evoluir”
+- “desenvolver iniciativas”
 
-REGRAS DE DISTRIBUIÇÃO DAS INITIATIVES:
-- Para cada tema, gerar iniciativas coerentes com sua natureza
-- Cobrir, quando aplicável:
-  - crescimento
-  - retenção
-  - eficiência operacional
-  - tecnologia/produto
-- Se um tema for mais abstrato, ainda assim gerar iniciativas plausíveis e executáveis
-- Nunca deixar um tema vazio
+Se aparecer algo assim, reescreva.
 
-REGRAS DE GROUNDING:
-- Use somente informações presentes no framing e no contexto original
-- Não invente:
-  - México
-  - expansão internacional
-  - novas geografias
-  - unidades de negócio inexistentes
-  - temas não citados
-- Se houver guardrails estruturados, as iniciativas e outcomes devem respeitá-los
-- Se faltar detalhe, complete de forma conservadora e plausível
-- Em caso de dúvida, prefira simplicidade e aderência ao material
+----------------------------------------
+REGRA DE ESTRUTURA DO NOME (OBRIGATÓRIA)
+----------------------------------------
 
-IMPORTANTE:
-- Não retorne strategy_graph
-- O strategy_graph será construído no backend
-- Sua única responsabilidade é retornar outcomes, kpis e initiatives bem estruturados
+Toda iniciativa deve conter:
 
-TESTE MENTAL OBRIGATÓRIO ANTES DE RETORNAR:
-Para cada iniciativa, pergunte:
-- esta iniciativa está específica o suficiente?
-- fica claro o que será feito?
-- ela parece executável por um time real?
-- ela está ligada a uma alavanca concreta de valor?
-Se a resposta for não, reescreva a iniciativa.
+1. AÇÃO CLARA:
+(ex: implantar, automatizar, redesenhar, criar, integrar, lançar, revisar)
 
-FORMATO DE SAÍDA:
+2. OBJETO CONCRETO:
+(ex: CRM, programa de fidelidade, motor de recomendação, mix de SKUs, modelo de pricing, fluxo de onboarding)
+
+3. MECANISMO DE IMPACTO:
+(ex: segmentação, personalização, tiers, dados comportamentais, automação, previsões, curadoria)
+
+Se faltar qualquer um desses 3 elementos → reescrever
+
+----------------------------------------
+REGRA DE NÍVEL DE EXECUÇÃO
+----------------------------------------
+
+A iniciativa deve estar no nível de:
+
+- épico de produto OU
+- programa executivo implementável
+
+Evitar:
+- slogans estratégicos
+- temas amplos (“plataforma”, “experiência”, “jornada”) sem detalhamento
+
+Se usar termos amplos, obrigatoriamente explicar:
+- qual funcionalidade
+- qual mecanismo
+- qual mudança prática
+
+----------------------------------------
+REGRA DE MECANISMO (CRÍTICA)
+----------------------------------------
+
+Toda iniciativa deve deixar claro:
+
+→ COMO ela gera impacto
+
+Exemplo:
+ERRADO:
+“Criar plataforma de personalização”
+
+CERTO:
+“Implantar motor de recomendação baseado em comportamento para personalização de ofertas no CRM”
+
+----------------------------------------
+REGRAS DE QUALIDADE
+----------------------------------------
+
+- Deve parecer algo que um executivo cobraria execução
+- Deve ser discutível em comitê (clara, concreta, defendível)
+- Não pode parecer output genérico de IA
+- Não pode ser abstrata
+- Não pode ser vaga
+
+----------------------------------------
+REGRAS DE IMPACTO E KPI
+----------------------------------------
+
+- expected_impact deve explicar impacto de negócio (não atividade)
+- expected_kpi_delta deve indicar mudança direta em KPI (ex: +15% conversão, -5pp churn)
+- Deve existir relação clara entre:
+  iniciativa → KPI → outcome
+
+----------------------------------------
+REGRAS DE GROUNDING
+----------------------------------------
+
+- Usar apenas contexto fornecido
+- Não inventar mercados, países ou negócios
+- Completar de forma conservadora quando necessário
+
+----------------------------------------
+TESTE FINAL (OBRIGATÓRIO)
+----------------------------------------
+
+Antes de retornar, valide cada iniciativa:
+
+- Está específica?
+- É executável?
+- Tem mecanismo claro?
+- Está ligada a uma alavanca de valor?
+
+Se qualquer resposta for não → reescrever
+
+----------------------------------------
+FORMATO DE SAÍDA
+----------------------------------------
+
 {
   "outcomes": [
     {
