@@ -70,6 +70,45 @@ REGRAS PARA INITIATIVES:
   - em execução
   - concluído
 
+REGRAS DE QUALIDADE DAS INITIATIVES:
+- Cada iniciativa deve ser concreta, específica e executável
+- A iniciativa deve descrever algo que um time realmente consiga implementar
+- Evite nomes vagos ou genéricos como:
+  - “melhorar experiência”
+  - “fortalecer transformação”
+  - “evoluir operação”
+  - “lançar iniciativas de produto”
+  - “implementar jornada operacional”
+  - “aprimorar eficiência”
+- O nome da iniciativa deve indicar claramente a ação principal
+- Sempre que possível, explicite no nome:
+  - o que será implantado, criado, revisado, lançado ou redesenhado
+  - para qual processo, cliente, canal, tema ou alavanca de valor
+- A iniciativa deve refletir uma alavanca clara de negócio, como:
+  - aquisição
+  - retenção
+  - ticket médio
+  - margem
+  - EBITDA
+  - capital de giro
+  - estoque
+  - produtividade comercial
+  - personalização
+  - CRM
+  - curadoria
+  - fidelização
+  - mix de produtos
+- expected_impact deve explicar a mudança de negócio gerada pela iniciativa
+- expected_kpi_delta deve explicar, de forma curta, o efeito esperado nos KPIs
+- Evite iniciativas abstratas que pareçam apenas títulos de workstream
+- Evite placeholders genéricos produzidos por IA
+- Cada iniciativa deve parecer algo que um executivo poderia aprovar e cobrar execução
+- Não misture níveis demais:
+  - evitar iniciativa excessivamente ampla e difusa
+  - evitar iniciativa que seja só um slogan estratégico
+  - evitar iniciativa que seja apenas rotina operacional muito micro
+- Prefira iniciativas em nível tático-executivo, claras o suficiente para orientar execução
+
 REGRAS DE DISTRIBUIÇÃO DAS INITIATIVES:
 - Para cada tema, gerar iniciativas coerentes com sua natureza
 - Cobrir, quando aplicável:
@@ -96,6 +135,14 @@ IMPORTANTE:
 - Não retorne strategy_graph
 - O strategy_graph será construído no backend
 - Sua única responsabilidade é retornar outcomes, kpis e initiatives bem estruturados
+
+TESTE MENTAL OBRIGATÓRIO ANTES DE RETORNAR:
+Para cada iniciativa, pergunte:
+- esta iniciativa está específica o suficiente?
+- fica claro o que será feito?
+- ela parece executável por um time real?
+- ela está ligada a uma alavanca concreta de valor?
+Se a resposta for não, reescreva a iniciativa.
 
 FORMATO DE SAÍDA:
 {
