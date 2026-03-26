@@ -2,6 +2,8 @@ import ast
 import json
 from collections import defaultdict
 
+from app.services.initiative_prioritization import prioritize_initiatives
+
 from app.models.schemas import (
     StrategyInput,
     StrategyMappingInput,
@@ -682,6 +684,7 @@ Materiais originais:
     mapping_data = normalize_mapping(mapping_data)
     mapping_data = ensure_mapping_balance(mapping_data, framing)
     mapping_data = rebuild_strategy_graph(mapping_data)
+    mapping_data = prioritize_initiatives(mapping_data)
     mapping = MappingOutput(**mapping_data)
 
     return {

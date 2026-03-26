@@ -171,6 +171,15 @@ class Initiative(BaseModel):
     owner: str
     status: str
 
+    priority_score: Optional[int] = None
+    priority_band: Optional[str] = None
+    impact_score: Optional[int] = None
+    effort_score: Optional[int] = None
+    time_score: Optional[int] = None
+    execution_readiness_score: Optional[int] = None
+    kpi_impacts: Optional[List[str]] = None
+    financial_impact_band: Optional[str] = None
+
 
 class StrategyGraphNode(BaseModel):
     kpi_leading: str
