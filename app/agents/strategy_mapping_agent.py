@@ -101,10 +101,10 @@ Toda iniciativa deve conter:
 (ex: implantar, automatizar, redesenhar, criar, integrar, lançar, revisar)
 
 2. OBJETO CONCRETO
-(ex: CRM, programa de fidelidade, motor de recomendação, mix de SKUs, modelo de pricing, fluxo de onboarding)
+(ex: CRM, programa de fidelidade, motor de recomendação, mix de SKUs, modelo de pricing, fluxo de onboarding, calendário de eventos, programa de comunidade)
 
 3. MECANISMO DE IMPACTO
-(ex: segmentação, personalização, tiers, dados comportamentais, automação, previsões, curadoria)
+(ex: segmentação, personalização, tiers, dados comportamentais, automação, previsões, curadoria, gamificação, recomendações)
 
 Se faltar qualquer um desses elementos → reescrever
 
@@ -161,6 +161,18 @@ REGRAS DE GROUNDING
 - Usar apenas contexto fornecido
 - Não inventar mercados, países ou produtos
 - Completar de forma conservadora
+
+----------------------------------------
+EXEMPLOS DE INICIATIVAS VÁLIDAS (REFERÊNCIA)
+----------------------------------------
+
+- “Implantar motor de recomendação baseado em comportamento para personalização de ofertas no CRM”
+- “Criar programa de assinatura em tiers com benefícios progressivos para aumento de ticket médio e retenção”
+- “Automatizar segmentação de clientes no CRM com base em comportamento de compra para campanhas de upsell”
+- “Desenvolver calendário de experiências exclusivas para membros com base em perfil de consumo para aumentar engajamento”
+- “Implantar programa de comunidade com gamificação e recompensas por interação para aumentar frequência de compra”
+
+Use estes exemplos como referência de nível de especificidade e concretude.
 
 ----------------------------------------
 REGRA DE VALIDAÇÃO E REESCRITA OBRIGATÓRIA
