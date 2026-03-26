@@ -173,6 +173,7 @@ class Initiative(BaseModel):
 
     priority_score: Optional[int] = None
     priority_band: Optional[str] = None
+    priority_rank: Optional[int] = None
     impact_score: Optional[int] = None
     effort_score: Optional[int] = None
     time_score: Optional[int] = None
