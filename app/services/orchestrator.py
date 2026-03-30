@@ -219,7 +219,7 @@ Complete o framing mantendo a lógica já construída.
 
 
 # =========================================================
-# OUTCOMES + KPIS
+# OUTCOMES + KPI HIERARCHY
 # =========================================================
 def normalize_outcomes_kpis(data: dict) -> dict:
     data = dict(data or {})
@@ -249,6 +249,8 @@ def normalize_outcomes_kpis(data: dict) -> dict:
         outcome_names.add(name)
 
     normalized_kpis = []
+    kpi_names = set()
+
     for kpi in data["kpis"]:
         if not isinstance(kpi, dict):
             continue
@@ -259,22 +261,82 @@ def normalize_outcomes_kpis(data: dict) -> dict:
             if str(x).strip() in outcome_names
         ]
 
-        normalized_kpis.append(
-            {
-                "name": str(kpi.get("name", "")).strip(),
-                "type": str(kpi.get("type", "")).strip().lower(),
-                "level": str(kpi.get("level", "")).strip().lower(),
-                "linked_outcomes": linked_outcomes,
-                "target": str(kpi.get("target", "")).strip(),
-                "owner": str(kpi.get("owner", "")).strip(),
-                "formula": str(kpi.get("formula", "")).strip(),
-                "source": str(kpi.get("source", "")).strip(),
-            }
-        )
+        parent_kpi = kpi.get("parent_kpi")
+        parent_kpi = str(parent_kpi).strip() if parent_kpi is not None else None
+
+        item = {
+            "name": str(kpi.get("name", "")).strip(),
+            "type": str(kpi.get("type", "")).strip().lower(),
+            "level": str(kpi.get("level", "")).strip().lower(),
+            "linked_outcomes": linked_outcomes,
+            "parent_kpi": parent_kpi if parent_kpi else None,
+            "target": str(kpi.get("target", "")).strip(),
+            "owner": str(kpi.get("owner", "")).strip(),
+            "formula": str(kpi.get("formula", "")).strip(),
+            "source": str(kpi.get("source", "")).strip(),
+        }
+        normalized_kpis.append(item)
+        if item["name"]:
+            kpi_names.add(item["name"])
+
+    for kpi in normalized_kpis:
+        if kpi["parent_kpi"] and kpi["parent_kpi"] not in kpi_names:
+            kpi["parent_kpi"] = None
 
     data["outcomes"] = normalized_outcomes
     data["kpis"] = normalized_kpis
     return data
+
+
+def enforce_kpi_hierarchy(outcomes: list, kpis: list) -> list:
+    by_outcome = defaultdict(list)
+    for kpi in kpis:
+        for outcome_name in kpi.get("linked_outcomes", []):
+            by_outcome[outcome_name].append(kpi)
+
+    fixed = []
+
+    for outcome in outcomes:
+        outcome_name = outcome["name"]
+        group = by_outcome.get(outcome_name, [])
+
+        lagging_roots = [
+            k for k in group
+            if k.get("type") == "lagging" and not k.get("parent_kpi")
+        ]
+
+        if not lagging_roots:
+            lagging_candidates = [k for k in group if k.get("type") == "lagging"]
+            if lagging_candidates:
+                lagging_candidates[0]["parent_kpi"] = None
+                lagging_roots = [lagging_candidates[0]]
+
+        root_name = lagging_roots[0]["name"] if lagging_roots else None
+
+        for k in group:
+            item = dict(k)
+
+            if item["name"] == root_name:
+                item["level"] = "north_star" if item.get("level") not in {"north_star", "driver"} else item["level"]
+                item["parent_kpi"] = None
+            else:
+                if not item.get("parent_kpi") and root_name:
+                    item["parent_kpi"] = root_name
+                if item.get("level") == "north_star":
+                    item["level"] = "driver"
+
+            fixed.append(item)
+
+    seen = set()
+    deduped = []
+    for item in fixed:
+        key = item["name"]
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(item)
+
+    return deduped
 
 
 # =========================================================
@@ -319,32 +381,6 @@ def normalize_initiatives(initiatives_data: dict, outcomes: list, kpis: list) ->
     return initiatives_data
 
 
-def enforce_kpi_outcome_links(outcomes: list, kpis: list) -> list:
-    outcome_names = {o["name"] for o in outcomes}
-    outcomes_by_theme = defaultdict(list)
-    for outcome in outcomes:
-        outcomes_by_theme[outcome["linked_theme"]].append(outcome["name"])
-
-    fixed = []
-    for kpi in kpis:
-        linked_outcomes = [x for x in kpi.get("linked_outcomes", []) if x in outcome_names]
-
-        if not linked_outcomes:
-            text = f"{kpi.get('name', '')} {kpi.get('target', '')}".lower()
-
-            for outcome in outcomes:
-                oname = outcome["name"].lower()
-                if any(token in text for token in oname.split() if len(token) > 4):
-                    linked_outcomes = [outcome["name"]]
-                    break
-
-        fixed_kpi = dict(kpi)
-        fixed_kpi["linked_outcomes"] = linked_outcomes
-        fixed.append(fixed_kpi)
-
-    return fixed
-
-
 def enforce_initiative_links(outcomes: list, kpis: list, initiatives: list) -> list:
     outcome_names = {o["name"] for o in outcomes}
     kpis_by_outcome = defaultdict(list)
@@ -354,14 +390,17 @@ def enforce_initiative_links(outcomes: list, kpis: list, initiatives: list) -> l
             kpis_by_outcome[linked_outcome].append(kpi["name"])
 
     fixed = []
+    all_kpi_names = {k["name"] for k in kpis}
+
     for initiative in initiatives:
         linked_outcome = initiative.get("linked_outcome", "")
-        linked_kpis = [k for k in initiative.get("linked_kpis", []) if k in {x["name"] for x in kpis}]
+        linked_kpis = [k for k in initiative.get("linked_kpis", []) if k in all_kpi_names]
 
         if linked_outcome not in outcome_names:
             text = f"{initiative.get('name', '')} {initiative.get('expected_impact', '')}".lower()
             for outcome in outcomes:
-                if any(token in text for token in outcome["name"].lower().split() if len(token) > 4):
+                tokens = [t for t in outcome["name"].lower().split() if len(t) > 4]
+                if any(token in text for token in tokens):
                     linked_outcome = outcome["name"]
                     break
 
@@ -377,44 +416,34 @@ def enforce_initiative_links(outcomes: list, kpis: list, initiatives: list) -> l
 
 
 def rebuild_strategy_graph(outcomes: list, kpis: list, initiatives: list) -> dict:
-    lagging_by_outcome = defaultdict(list)
-    leading_by_outcome = defaultdict(list)
-
-    for kpi in kpis:
-        for linked_outcome in kpi.get("linked_outcomes", []):
-            if kpi.get("type") == "leading":
-                leading_by_outcome[linked_outcome].append(kpi["name"])
-            else:
-                lagging_by_outcome[linked_outcome].append(kpi["name"])
-
     graph = {}
+    kpi_map = {k["name"]: k for k in kpis}
+
     for initiative in initiatives:
-        linked_outcome = initiative.get("linked_outcome", "")
         linked_kpis = initiative.get("linked_kpis", [])
+        linked_outcome = initiative.get("linked_outcome", "")
 
-        kpi_leading = ""
-        kpi_lagging = ""
+        leading = ""
+        lagging = ""
 
-        for k in linked_kpis:
-            kobj = next((item for item in kpis if item["name"] == k), None)
-            if not kobj:
+        for kpi_name in linked_kpis:
+            kpi = kpi_map.get(kpi_name)
+            if not kpi:
                 continue
-            if kobj["type"] == "leading" and not kpi_leading:
-                kpi_leading = k
-            if kobj["type"] == "lagging" and not kpi_lagging:
-                kpi_lagging = k
+            if kpi["type"] == "leading" and not leading:
+                leading = kpi_name
+            if kpi["type"] == "lagging" and not lagging:
+                lagging = kpi_name
 
-        if not kpi_leading and linked_outcome:
-            candidates = leading_by_outcome.get(linked_outcome, [])
-            kpi_leading = candidates[0] if candidates else ""
-
-        if not kpi_lagging and linked_outcome:
-            candidates = lagging_by_outcome.get(linked_outcome, [])
-            kpi_lagging = candidates[0] if candidates else ""
+        if not lagging and linked_outcome:
+            for kpi in kpis:
+                if linked_outcome in kpi.get("linked_outcomes", []) and kpi.get("type") == "lagging" and not kpi.get("parent_kpi"):
+                    lagging = kpi["name"]
+                    break
 
         graph[initiative["name"]] = {
-            "kpi_leading": kpi_leading,
-            "kpi_lagging": kpi_lagging,
+            "kpi_leading": leading,
+            "kpi_lagging": lagging,
             "outcome": linked_outcome,
             "causal_logic": f"A iniciativa '{initiative['name']}' move KPI(s) {', '.join(linked_kpis)} e contribui para o outcome '{linked_outcome}'."
         }
@@ -454,7 +483,7 @@ def build_executive_summary(
 
     headline = (
         f"{company_name}: a direção estratégica está definida, "
-        f"mas o valor vem da qualidade da cascata entre outcomes, KPIs e iniciativas."
+        f"mas o valor vem da qualidade da cascata entre outcomes, KPI hierarchy e iniciativas."
     )
 
     final_takeaway = (
@@ -492,9 +521,7 @@ Materiais:
     framing_data = enrich_framing_if_incomplete(framing_data, base_context)
     framing = FramingOutput(**framing_data)
 
-    return {
-        "framing": framing.model_dump()
-    }
+    return {"framing": framing.model_dump()}
 
 
 def generate_strategy_outcomes_kpis(payload: StrategyOutcomesKPIsInput):
@@ -502,7 +529,7 @@ def generate_strategy_outcomes_kpis(payload: StrategyOutcomesKPIsInput):
     framing = payload.framing
 
     user_prompt = f"""
-Gere outcomes e KPIs com ligação causal explícita a partir do framing estratégico.
+Gere outcomes e KPI hierarchy com ligação causal explícita a partir do framing estratégico.
 
 Framing:
 {json.dumps(framing, ensure_ascii=False)}
@@ -512,7 +539,7 @@ Materiais originais:
 """
     data = call_llm_json(OUTCOMES_KPIS_PROMPT, user_prompt)
     data = normalize_outcomes_kpis(data)
-    data["kpis"] = enforce_kpi_outcome_links(data["outcomes"], data["kpis"])
+    data["kpis"] = enforce_kpi_hierarchy(data["outcomes"], data["kpis"])
 
     outcomes_kpis = OutcomesKPIsOutput(**data)
     return outcomes_kpis.model_dump()
@@ -521,8 +548,8 @@ Materiais originais:
 def generate_strategy_initiatives(payload: StrategyInitiativesInput):
     base_context = build_strategy_context_from_mapping_input(payload)
     framing = payload.framing
-    outcomes = [o.model_dump() if hasattr(o, "model_dump") else o for o in payload.outcomes]
-    kpis = [k.model_dump() if hasattr(k, "model_dump") else k for k in payload.kpis]
+    outcomes = payload.outcomes
+    kpis = payload.kpis
 
     user_prompt = f"""
 Gere iniciativas executáveis com ligação explícita a outcomes e KPIs.

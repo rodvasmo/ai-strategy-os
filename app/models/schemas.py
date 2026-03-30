@@ -159,8 +159,12 @@ class FramingOutput(BaseModel):
 
 
 # =========================================================
-# OUTCOMES + KPIS
+# OUTCOMES + KPI HIERARCHY
 # =========================================================
+KPIType = Literal["leading", "lagging"]
+KPILevel = Literal["north_star", "driver", "supporting"]
+
+
 class Outcome(BaseModel):
     name: str
     linked_theme: str
@@ -169,15 +173,12 @@ class Outcome(BaseModel):
     value_driver: str
 
 
-KPIType = Literal["leading", "lagging"]
-KPILevel = Literal["north_star", "driver", "supporting"]
-
-
 class KPI(BaseModel):
     name: str
     type: KPIType
     level: KPILevel
     linked_outcomes: List[str]
+    parent_kpi: Optional[str] = None
     target: str
     owner: str
     formula: str
