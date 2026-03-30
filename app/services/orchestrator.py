@@ -6,26 +6,26 @@ from app.services.initiative_prioritization import prioritize_initiatives
 
 from app.models.schemas import (
     StrategyInput,
-    StrategyMappingInput,
+    StrategyOutcomesKPIsInput,
+    StrategyInitiativesInput,
     StrategyReviewInput,
-    KPIScreenInput,
     FramingOutput,
-    MappingOutput,
+    OutcomesKPIsOutput,
+    InitiativesOutput,
     KPIIntegrityOutput,
     PortfolioOutput,
     NarrativeOutput,
-    KPIScreenOutput,
 )
 from app.services.parser import (
     build_framing_context,
-    build_strategy_context,
     build_strategy_context_from_mapping_input,
 )
 from app.services.llm import call_llm_json
 from app.services.scoring import calculate_strategy_score
 
 from app.agents.strategy_framing_agent import SYSTEM_PROMPT as FRAMING_PROMPT
-from app.agents.strategy_mapping_agent import SYSTEM_PROMPT as MAPPING_PROMPT
+from app.agents.strategy_outcomes_kpis_agent import SYSTEM_PROMPT as OUTCOMES_KPIS_PROMPT
+from app.agents.strategy_initiatives_agent import SYSTEM_PROMPT as INITIATIVES_PROMPT
 from app.agents.kpi_integrity_agent import SYSTEM_PROMPT as KPI_PROMPT
 from app.agents.portfolio_intelligence_agent import SYSTEM_PROMPT as PORTFOLIO_PROMPT
 from app.agents.narrative_agent import SYSTEM_PROMPT as NARRATIVE_PROMPT
@@ -86,26 +86,6 @@ def _normalize_string_list(values):
         normalized.append(str(item))
 
     return [x for x in normalized if x]
-
-
-def _safe_lower(value):
-    return str(value or "").strip().lower()
-
-
-def _unique_keep_order(values):
-    seen = set()
-    result = []
-
-    for item in values:
-        clean = str(item or "").strip()
-        if not clean:
-            continue
-        if clean in seen:
-            continue
-        seen.add(clean)
-        result.append(clean)
-
-    return result
 
 
 # =========================================================
@@ -225,13 +205,13 @@ Complete o framing mantendo a lógica já construída.
         repaired["assumptions"] = repaired.get("assumptions", []) + [
             "A empresa conseguirá equilibrar crescimento e rentabilidade.",
             "Os investimentos em tecnologia gerarão ganhos reais de produtividade.",
-            "A base de clientes responderá positivamente a recorrência e conteúdo."
+            "A base de clientes responderá positivamente à proposta de valor."
         ]
 
     if len(repaired.get("contradictions", [])) < 2:
         repaired["contradictions"] = repaired.get("contradictions", []) + [
-            "A empresa busca crescer rapidamente, mas enfrenta pressão de margem e capital empatado.",
-            "A construção do ecossistema aumenta diferenciação, mas também aumenta complexidade operacional."
+            "A empresa busca crescer, mas enfrenta limites de rentabilidade e capital.",
+            "A diferenciação comercial pode aumentar complexidade operacional."
         ]
 
     repaired["assumptions"] = repaired["assumptions"][:6]
@@ -241,230 +221,90 @@ Complete o framing mantendo a lógica já construída.
 
 
 # =========================================================
-# MAPPING
+# OUTCOMES + KPIS
 # =========================================================
-def normalize_mapping(mapping_data: dict) -> dict:
-    mapping_data = dict(mapping_data or {})
+def normalize_outcomes_kpis(data: dict) -> dict:
+    data = dict(data or {})
+    data["outcomes"] = _dict_values_as_list(data.get("outcomes", []))
+    data["kpis"] = _dict_values_as_list(data.get("kpis", []))
 
-    mapping_data["outcomes"] = _dict_values_as_list(mapping_data.get("outcomes", []))
-    mapping_data["kpis"] = _dict_values_as_list(mapping_data.get("kpis", []))
-    mapping_data["initiatives"] = _dict_values_as_list(mapping_data.get("initiatives", []))
+    normalized_outcomes = []
+    for outcome in data["outcomes"]:
+        if not isinstance(outcome, dict):
+            continue
 
-    for outcome in mapping_data.get("outcomes", []):
-        if "target" in outcome and outcome["target"] is not None:
-            outcome["target"] = str(outcome["target"])
-
-    for kpi in mapping_data.get("kpis", []):
-        if "target" in kpi and kpi["target"] is not None:
-            kpi["target"] = str(kpi["target"])
-
-    graph = mapping_data.get("strategy_graph")
-    if isinstance(graph, list):
-        fixed_graph = {}
-        for item in graph:
-            name = item.get("initiative") or item.get("name")
-            if name:
-                fixed_graph[name] = {
-                    "kpi_leading": item.get("kpi_leading", ""),
-                    "kpi_lagging": item.get("kpi_lagging", ""),
-                    "outcome": item.get("outcome", ""),
-                    "causal_logic": item.get("causal_logic", "") or item.get("gap", ""),
-                }
-        mapping_data["strategy_graph"] = fixed_graph
-
-    if graph is None or not isinstance(mapping_data.get("strategy_graph"), dict):
-        mapping_data["strategy_graph"] = {}
-
-    return mapping_data
-
-
-def _safe_status(status: str) -> str:
-    allowed = {"planejado", "em execução", "concluído"}
-    status = str(status or "").strip().lower()
-    if status in allowed:
-        return status
-    return "planejado"
-
-
-def _slugify_owner_from_theme(theme_name: str) -> str:
-    name = (theme_name or "").lower()
-    if "estoque" in name or "capital" in name or "margem" in name:
-        return "Operações"
-    if "digital" in name or "tecnologia" in name or "produto" in name:
-        return "Produto"
-    if "clube" in name or "assinatura" in name or "cliente" in name:
-        return "Marketing"
-    return "Estratégia"
-
-
-def _infer_time_horizon_from_theme(theme_name: str) -> str:
-    name = (theme_name or "").lower()
-    if "estoque" in name or "margem" in name:
-        return "6 meses"
-    if "digital" in name or "tecnologia" in name:
-        return "9 meses"
-    return "6 meses"
-
-
-def _pick_outcome_for_theme(outcomes_by_theme: dict, theme_name: str) -> str:
-    theme_outcomes = outcomes_by_theme.get(theme_name, [])
-    if theme_outcomes:
-        return theme_outcomes[0]["name"]
-    return f"Avançar o tema {theme_name}"
-
-
-def _pick_leading_kpi_for_theme(kpis: list, theme_name: str) -> str:
-    theme_name_lower = (theme_name or "").lower()
-
-    theme_keywords = []
-    if "estoque" in theme_name_lower or "capital" in theme_name_lower or "margem" in theme_name_lower:
-        theme_keywords = ["estoque", "giro", "capital", "margem", "custo", "eficiência"]
-    elif "digital" in theme_name_lower or "tecnologia" in theme_name_lower or "produto" in theme_name_lower:
-        theme_keywords = ["digital", "produto", "tecnologia", "convers", "engaj", "onboarding"]
-    elif "clube" in theme_name_lower or "assinatura" in theme_name_lower or "cliente" in theme_name_lower:
-        theme_keywords = ["clube", "assinatura", "churn", "reten", "convers", "engaj"]
-    else:
-        theme_keywords = ["convers", "engaj", "eficiência"]
-
-    leading = [k for k in kpis if str(k.get("type", "")).strip().lower() == "leading"]
-
-    for keyword in theme_keywords:
-        for kpi in leading:
-            if keyword in str(kpi.get("name", "")).lower():
-                return kpi["name"]
-
-    if leading:
-        return leading[0]["name"]
-
-    return ""
-
-
-def _pick_lagging_kpi_for_theme(kpis: list, outcome_name: str, theme_name: str) -> str:
-    lagging = [k for k in kpis if str(k.get("type", "")).strip().lower() == "lagging"]
-    outcome_lower = (outcome_name or "").lower()
-    theme_lower = (theme_name or "").lower()
-
-    for kpi in lagging:
-        kpi_name = str(kpi.get("name", "")).lower()
-        if any(token in kpi_name for token in outcome_lower.split()):
-            return kpi["name"]
-
-    if "estoque" in theme_lower or "capital" in theme_lower:
-        for kpi in lagging:
-            if any(word in str(kpi.get("name", "")).lower() for word in ["estoque", "capital", "margem"]):
-                return kpi["name"]
-
-    if "digital" in theme_lower or "tecnologia" in theme_lower:
-        for kpi in lagging:
-            if any(word in str(kpi.get("name", "")).lower() for word in ["receita", "convers", "reten", "mrr"]):
-                return kpi["name"]
-
-    if "clube" in theme_lower or "assinatura" in theme_lower:
-        for kpi in lagging:
-            if any(word in str(kpi.get("name", "")).lower() for word in ["mrr", "churn", "receita", "assin"]):
-                return kpi["name"]
-
-    if lagging:
-        return lagging[0]["name"]
-
-    return ""
-
-
-def _build_default_initiatives_for_theme(theme: dict, outcomes_by_theme: dict) -> list:
-    theme_name = theme["name"]
-    theme_desc = theme.get("description", "")
-    outcome_name = _pick_outcome_for_theme(outcomes_by_theme, theme_name)
-    owner = _slugify_owner_from_theme(theme_name)
-    horizon = _infer_time_horizon_from_theme(theme_name)
-
-    theme_lower = theme_name.lower()
-    desc_lower = theme_desc.lower()
-
-    defaults = []
-
-    if any(word in theme_lower for word in ["estoque", "capital", "margem"]) or any(
-        word in desc_lower for word in ["estoque", "capital", "margem", "financeira", "financeiro"]
-    ):
-        defaults = [
+        normalized_outcomes.append(
             {
-                "name": f"Redesenhar políticas operacionais para {theme_name.lower()}",
-                "linked_theme": theme_name,
-                "linked_outcome": outcome_name,
-                "expected_impact": "Melhorar disciplina operacional e capturar ganhos financeiros no curto prazo.",
-                "expected_kpi_delta": "Melhoria operacional mensurável nos indicadores do tema.",
-                "time_horizon": horizon,
-                "owner": owner,
-                "status": "planejado",
-            },
-            {
-                "name": f"Implementar rotina de gestão e acompanhamento para {theme_name.lower()}",
-                "linked_theme": theme_name,
-                "linked_outcome": outcome_name,
-                "expected_impact": "Aumentar previsibilidade, reduzir ineficiências e acelerar execução.",
-                "expected_kpi_delta": "Redução de desperdícios e maior controle sobre o resultado-alvo.",
-                "time_horizon": horizon,
-                "owner": owner,
-                "status": "planejado",
-            },
-        ]
-    elif any(word in theme_lower for word in ["digital", "tecnologia", "produto", "experiência"]) or any(
-        word in desc_lower for word in ["digital", "tecnologia", "produto", "experiência", "phygital"]
-    ):
-        defaults = [
-            {
-                "name": f"Lançar iniciativas de produto para fortalecer {theme_name.lower()}",
-                "linked_theme": theme_name,
-                "linked_outcome": outcome_name,
-                "expected_impact": "Elevar adoção, melhorar experiência e aumentar retenção.",
-                "expected_kpi_delta": "Melhoria mensurável nos indicadores de adoção e engajamento.",
-                "time_horizon": horizon,
-                "owner": owner,
-                "status": "planejado",
-            },
-            {
-                "name": f"Implementar jornada operacional para acelerar {theme_name.lower()}",
-                "linked_theme": theme_name,
-                "linked_outcome": outcome_name,
-                "expected_impact": "Reduzir fricção de uso e aumentar captura de valor da iniciativa.",
-                "expected_kpi_delta": "Melhora de conversão, ativação ou retenção associada ao tema.",
-                "time_horizon": horizon,
-                "owner": owner,
-                "status": "planejado",
-            },
-        ]
-    else:
-        defaults = [
-            {
-                "name": f"Lançar programa estruturado para avançar {theme_name.lower()}",
-                "linked_theme": theme_name,
-                "linked_outcome": outcome_name,
-                "expected_impact": "Acelerar execução do tema estratégico com foco em resultado de negócio.",
-                "expected_kpi_delta": "Melhoria mensurável nos KPIs associados ao tema.",
-                "time_horizon": horizon,
-                "owner": owner,
-                "status": "planejado",
-            },
-            {
-                "name": f"Criar rotina de gestão para sustentar {theme_name.lower()}",
-                "linked_theme": theme_name,
-                "linked_outcome": outcome_name,
-                "expected_impact": "Aumentar consistência de execução e reduzir dispersão estratégica.",
-                "expected_kpi_delta": "Maior estabilidade operacional e evolução do resultado-alvo.",
-                "time_horizon": horizon,
-                "owner": owner,
-                "status": "planejado",
-            },
-        ]
+                "name": str(outcome.get("name", "")).strip(),
+                "linked_theme": str(outcome.get("linked_theme", "")).strip(),
+                "target": str(outcome.get("target", "")).strip(),
+            }
+        )
 
-    return defaults
+    normalized_kpis = []
+    for kpi in data["kpis"]:
+        if not isinstance(kpi, dict):
+            continue
+
+        normalized_kpis.append(
+            {
+                "name": str(kpi.get("name", "")).strip(),
+                "type": str(kpi.get("type", "")).strip(),
+                "target": str(kpi.get("target", "")).strip(),
+                "owner": str(kpi.get("owner", "")).strip(),
+                "formula": str(kpi.get("formula", "")).strip(),
+                "source": str(kpi.get("source", "")).strip(),
+                "kpi_role": str(kpi.get("kpi_role", "")).strip() or None,
+            }
+        )
+
+    data["outcomes"] = normalized_outcomes
+    data["kpis"] = normalized_kpis
+    return data
 
 
-def rebuild_strategy_graph(mapping_data: dict) -> dict:
-    kpis = mapping_data.get("kpis", [])
-    initiatives = mapping_data.get("initiatives", [])
+# =========================================================
+# INITIATIVES
+# =========================================================
+def normalize_initiatives(initiatives_data: dict) -> dict:
+    initiatives_data = dict(initiatives_data or {})
+    initiatives_data["initiatives"] = _dict_values_as_list(
+        initiatives_data.get("initiatives", [])
+    )
 
-    leading_kpis = [k for k in kpis if str(k.get("type", "")).lower() == "leading"]
-    lagging_kpis = [k for k in kpis if str(k.get("type", "")).lower() == "lagging"]
+    normalized = []
+    for item in initiatives_data["initiatives"]:
+        if not isinstance(item, dict):
+            continue
+
+        normalized.append(
+            {
+                "name": str(item.get("name", "")).strip(),
+                "linked_theme": str(item.get("linked_theme", "")).strip(),
+                "linked_outcome": str(item.get("linked_outcome", "")).strip(),
+                "expected_impact": str(item.get("expected_impact", "")).strip(),
+                "expected_kpi_delta": str(item.get("expected_kpi_delta", "")).strip(),
+                "time_horizon": str(item.get("time_horizon", "")).strip(),
+                "owner": str(item.get("owner", "")).strip(),
+                "status": str(item.get("status", "")).strip().lower() or "planejado",
+            }
+        )
+
+    initiatives_data["initiatives"] = normalized
+    return initiatives_data
+
+
+def rebuild_strategy_graph(outcomes: list, kpis: list, initiatives: list) -> dict:
+    strategy_graph = {}
+
+    theme_to_outcomes = defaultdict(list)
+    for outcome in outcomes:
+        linked_theme = str(outcome.get("linked_theme", "")).strip()
+        if linked_theme:
+            theme_to_outcomes[linked_theme].append(outcome["name"])
+
+    leading_kpis = [k["name"] for k in kpis if str(k.get("type", "")).strip().lower() == "leading"]
+    lagging_kpis = [k["name"] for k in kpis if str(k.get("type", "")).strip().lower() == "lagging"]
 
     def pick_leading(initiative_name: str, theme_name: str) -> str:
         text = f"{initiative_name} {theme_name}".lower()
@@ -472,42 +312,47 @@ def rebuild_strategy_graph(mapping_data: dict) -> dict:
         keyword_sets = [
             ["cac", "convers", "digital", "crm", "campanha", "autom"],
             ["engaj", "comunidade", "evento", "conteúdo", "fidel"],
-            ["estoque", "giro", "supply", "mix", "compras", "fornecedor"],
+            ["estoque", "giro", "mix", "compras", "fornecedor", "capital"],
             ["clube", "assin", "reten", "churn"],
+            ["margem", "ebitda", "rentabilidade", "ticket"],
         ]
 
         for keywords in keyword_sets:
-            for kpi in leading_kpis:
-                kname = str(kpi.get("name", "")).lower()
+            for kpi_name in leading_kpis:
+                kname = str(kpi_name).lower()
                 if any(word in text and word in kname for word in keywords):
-                    return kpi["name"]
+                    return kpi_name
 
-        return leading_kpis[0]["name"] if leading_kpis else ""
+        return leading_kpis[0] if leading_kpis else ""
 
     def pick_lagging(outcome_name: str, theme_name: str) -> str:
         text = f"{outcome_name} {theme_name}".lower()
 
-        for kpi in lagging_kpis:
-            kname = str(kpi.get("name", "")).lower()
+        for kpi_name in lagging_kpis:
+            kname = str(kpi_name).lower()
             if "mrr" in text and "mrr" in kname:
-                return kpi["name"]
+                return kpi_name
             if "churn" in text and "churn" in kname:
-                return kpi["name"]
-            if "estoque" in text and ("estoque" in kname or "dias de estoque" in kname):
-                return kpi["name"]
+                return kpi_name
+            if "estoque" in text and ("estoque" in kname or "giro" in kname):
+                return kpi_name
             if "nps" in text and "nps" in kname:
-                return kpi["name"]
-            if "receita" in text and ("receita" in kname or "assinantes" in kname):
-                return kpi["name"]
+                return kpi_name
+            if "receita" in text and "receita" in kname:
+                return kpi_name
+            if "margem" in text and ("margem" in kname or "ebitda" in kname):
+                return kpi_name
 
-        return lagging_kpis[0]["name"] if lagging_kpis else ""
-
-    strategy_graph = {}
+        return lagging_kpis[0] if lagging_kpis else ""
 
     for initiative in initiatives:
         initiative_name = initiative.get("name", "")
         theme_name = initiative.get("linked_theme", "")
         outcome_name = initiative.get("linked_outcome", "")
+
+        if not outcome_name:
+            possible_outcomes = theme_to_outcomes.get(theme_name, [])
+            outcome_name = possible_outcomes[0] if possible_outcomes else ""
 
         kpi_leading = pick_leading(initiative_name, theme_name)
         kpi_lagging = pick_lagging(outcome_name, theme_name)
@@ -516,224 +361,10 @@ def rebuild_strategy_graph(mapping_data: dict) -> dict:
             "kpi_leading": kpi_leading,
             "kpi_lagging": kpi_lagging,
             "outcome": outcome_name,
-            "causal_logic": f"A iniciativa '{initiative_name}' melhora '{kpi_leading}' e contribui para '{outcome_name}'."
+            "causal_logic": f"A iniciativa '{initiative_name}' melhora '{kpi_leading}' e contribui para o outcome '{outcome_name}'."
         }
 
-    mapping_data["strategy_graph"] = strategy_graph
-    return mapping_data
-
-
-def ensure_mapping_balance(mapping_data: dict, framing_data: dict) -> dict:
-    mapping_data = normalize_mapping(mapping_data)
-    strategic_themes = framing_data.get("strategic_themes", [])
-
-    theme_names = [t.get("name", "").strip() for t in strategic_themes if str(t.get("name", "")).strip()]
-    theme_name_set = set(theme_names)
-
-    outcomes = mapping_data.get("outcomes", [])
-    outcomes_by_theme = defaultdict(list)
-    for outcome in outcomes:
-        linked_theme = str(outcome.get("linked_theme", "")).strip()
-        if linked_theme:
-            outcomes_by_theme[linked_theme].append(outcome)
-
-    initiatives = []
-    for item in mapping_data.get("initiatives", []):
-        linked_theme = str(item.get("linked_theme", "")).strip()
-        if linked_theme not in theme_name_set:
-            continue
-
-        linked_outcome = str(item.get("linked_outcome", "")).strip()
-        if not linked_outcome:
-            linked_outcome = _pick_outcome_for_theme(outcomes_by_theme, linked_theme)
-
-        initiatives.append(
-            {
-                "name": str(item.get("name", "")).strip() or f"Iniciativa para {linked_theme}",
-                "linked_theme": linked_theme,
-                "linked_outcome": linked_outcome,
-                "expected_impact": str(item.get("expected_impact", "")).strip() or "Melhorar execução e capturar resultado de negócio.",
-                "expected_kpi_delta": str(item.get("expected_kpi_delta", "")).strip() or "Melhoria mensurável nos KPIs associados.",
-                "time_horizon": str(item.get("time_horizon", "")).strip() or _infer_time_horizon_from_theme(linked_theme),
-                "owner": str(item.get("owner", "")).strip() or _slugify_owner_from_theme(linked_theme),
-                "status": _safe_status(item.get("status", "")),
-            }
-        )
-
-    initiatives_by_theme = defaultdict(list)
-    for initiative in initiatives:
-        initiatives_by_theme[initiative["linked_theme"]].append(initiative)
-
-    for theme in strategic_themes:
-        theme_name = str(theme.get("name", "")).strip()
-        current = initiatives_by_theme.get(theme_name, [])
-
-        if len(current) < 2:
-            defaults = _build_default_initiatives_for_theme(theme, outcomes_by_theme)
-            existing_names = {i["name"] for i in current}
-
-            for candidate in defaults:
-                if candidate["name"] not in existing_names:
-                    current.append(candidate)
-                    existing_names.add(candidate["name"])
-                if len(current) >= 2:
-                    break
-
-            initiatives_by_theme[theme_name] = current
-
-    balanced_initiatives = []
-    for theme_name in theme_names:
-        balanced_initiatives.extend(initiatives_by_theme.get(theme_name, [])[:4])
-
-    mapping_data["initiatives"] = balanced_initiatives
-    return mapping_data
-
-
-# =========================================================
-# KPI SCREEN BUILDER
-# =========================================================
-def _infer_coverage_score(linked_initiatives_count: int, linked_outcomes_count: int) -> int:
-    score = 0
-
-    if linked_initiatives_count >= 3:
-        score += 60
-    elif linked_initiatives_count == 2:
-        score += 45
-    elif linked_initiatives_count == 1:
-        score += 25
-
-    if linked_outcomes_count >= 2:
-        score += 40
-    elif linked_outcomes_count == 1:
-        score += 20
-
-    return min(score, 100)
-
-
-def _infer_coverage_status(score: int) -> str:
-    if score >= 75:
-        return "alto"
-    if score >= 45:
-        return "medio"
-    return "baixo"
-
-
-def build_kpi_screen(mapping: dict) -> dict:
-    mapping = dict(mapping or {})
-
-    kpis = mapping.get("kpis", []) or []
-    initiatives = mapping.get("initiatives", []) or []
-    strategy_graph = mapping.get("strategy_graph", {}) or {}
-
-    kpi_to_outcomes = defaultdict(list)
-    kpi_to_initiatives = defaultdict(list)
-
-    for initiative in initiatives:
-        initiative_name = str(initiative.get("name", "")).strip()
-        if not initiative_name:
-            continue
-
-        graph_node = strategy_graph.get(initiative_name, {}) or {}
-        outcome_name = str(graph_node.get("outcome", "")).strip()
-        leading_kpi = str(graph_node.get("kpi_leading", "")).strip()
-        lagging_kpi = str(graph_node.get("kpi_lagging", "")).strip()
-
-        if outcome_name:
-            if leading_kpi:
-                kpi_to_outcomes[leading_kpi].append(outcome_name)
-            if lagging_kpi:
-                kpi_to_outcomes[lagging_kpi].append(outcome_name)
-
-        initiative_payload = {
-            "name": initiative_name,
-            "owner": str(initiative.get("owner", "")).strip(),
-            "status": str(initiative.get("status", "")).strip(),
-            "time_horizon": str(initiative.get("time_horizon", "")).strip(),
-            "expected_impact": str(initiative.get("expected_impact", "")).strip(),
-            "priority_band": initiative.get("priority_band"),
-            "priority_score": initiative.get("priority_score"),
-        }
-
-        if leading_kpi:
-            kpi_to_initiatives[leading_kpi].append(initiative_payload)
-
-        if lagging_kpi:
-            kpi_to_initiatives[lagging_kpi].append(initiative_payload)
-
-    kpi_views = []
-
-    for kpi in kpis:
-        kpi_name = str(kpi.get("name", "")).strip()
-        if not kpi_name:
-            continue
-
-        linked_outcomes = _unique_keep_order(kpi_to_outcomes.get(kpi_name, []))
-
-        raw_linked_initiatives = kpi_to_initiatives.get(kpi_name, [])
-        deduped_initiatives = []
-        seen_names = set()
-
-        for item in raw_linked_initiatives:
-            item_name = str(item.get("name", "")).strip()
-            if not item_name or item_name in seen_names:
-                continue
-            seen_names.add(item_name)
-            deduped_initiatives.append(item)
-
-        coverage_score = _infer_coverage_score(
-            linked_initiatives_count=len(deduped_initiatives),
-            linked_outcomes_count=len(linked_outcomes),
-        )
-        coverage_status = _infer_coverage_status(coverage_score)
-
-        kpi_views.append(
-            {
-                "name": kpi_name,
-                "type": str(kpi.get("type", "")).strip(),
-                "target": str(kpi.get("target", "")).strip(),
-                "owner": str(kpi.get("owner", "")).strip(),
-                "formula": str(kpi.get("formula", "")).strip(),
-                "source": str(kpi.get("source", "")).strip(),
-                "linked_outcomes": linked_outcomes,
-                "linked_initiatives": deduped_initiatives,
-                "coverage_score": coverage_score,
-                "coverage_status": coverage_status,
-            }
-        )
-
-    total = len(kpi_views)
-    leading_count = sum(1 for x in kpi_views if _safe_lower(x.get("type")) == "leading")
-    lagging_count = sum(1 for x in kpi_views if _safe_lower(x.get("type")) == "lagging")
-    avg_coverage = round(sum(x["coverage_score"] for x in kpi_views) / total) if total else 0
-
-    return {
-        "kpis": kpi_views,
-        "summary": {
-            "total_kpis": total,
-            "leading_kpis": leading_count,
-            "lagging_kpis": lagging_count,
-            "average_coverage_score": avg_coverage,
-        },
-    }
-
-
-def generate_guardrail_summary(constraints):
-    if not constraints:
-        return {"summary": "Nenhum guardrail informado", "guardrails": []}
-
-    return {
-        "summary": f"{len(constraints)} guardrails definidos",
-        "guardrails": [
-            {
-                "name": g.name,
-                "category": g.category,
-                "priority": g.priority,
-                "rule": f"{g.operator} {g.target_value or ''} {g.target_unit or ''}".strip(),
-                "owner": g.owner,
-            }
-            for g in constraints
-        ],
-    }
+    return strategy_graph
 
 
 # =========================================================
@@ -742,7 +373,9 @@ def generate_guardrail_summary(constraints):
 def build_executive_summary(
     payload: StrategyInput,
     framing: dict,
-    mapping: dict,
+    outcomes: list,
+    kpis: list,
+    initiatives: list,
     review: dict,
 ) -> dict:
     strategy_score = review.get("strategy_score", {})
@@ -750,10 +383,7 @@ def build_executive_summary(
 
     company_name = payload.company_name or "Empresa"
 
-    top_insights = [
-        narrative.get("executive_summary", ""),
-    ]
-
+    top_insights = [narrative.get("executive_summary", "")]
     for item in narrative.get("key_risks", [])[:2]:
         top_insights.append(item)
 
@@ -764,18 +394,17 @@ def build_executive_summary(
             priority_actions.append(action)
 
     key_metrics = []
-    for outcome in mapping.get("outcomes", [])[:4]:
-        key_metrics.append(f"{outcome.get('name')}: {outcome.get('target')}")
+    for kpi in kpis[:5]:
+        key_metrics.append(f"{kpi.get('name')}: {kpi.get('target')}")
 
     headline = (
-        f"{company_name}: crescimento e recorrência têm potencial relevante, "
-        f"mas eficiência operacional e governança de métricas limitam a captura de valor."
+        f"{company_name}: a direção estratégica está clara, "
+        f"mas a execução dependerá da ligação correta entre outcomes, KPIs e iniciativas."
     )
 
     final_takeaway = (
         f"Score estratégico atual: {strategy_score.get('overall_score', 'n/a')}. "
-        "A direção estratégica faz sentido, mas a priorização de capital e a integridade dos KPIs "
-        "precisam melhorar para sustentar crescimento com rentabilidade."
+        "A qualidade da execução melhora quando os outcomes orientam os KPIs e os KPIs orientam as iniciativas."
     )
 
     return {
@@ -813,48 +442,69 @@ Materiais:
     }
 
 
-def generate_strategy_mapping(payload: StrategyMappingInput):
+def generate_strategy_outcomes_kpis(payload: StrategyOutcomesKPIsInput):
     base_context = build_strategy_context_from_mapping_input(payload)
     framing = payload.framing
 
-    mapping_user_prompt = f"""
-Construa o modelo executável da estratégia.
+    user_prompt = f"""
+Gere outcomes e KPIs a partir do framing estratégico.
 
-IMPORTANTE:
-- Todas as iniciativas devem respeitar os guardrails.
-- Evite iniciativas que violem EBITDA, CAC, headcount ou constraints críticos.
-
-Framing estratégico:
+Framing:
 {json.dumps(framing, ensure_ascii=False)}
 
 Materiais originais:
 {base_context}
 """
-    mapping_data = call_llm_json(MAPPING_PROMPT, mapping_user_prompt)
-    mapping_data = normalize_mapping(mapping_data)
-    mapping_data = ensure_mapping_balance(mapping_data, framing)
-    mapping_data = rebuild_strategy_graph(mapping_data)
-    mapping_data = prioritize_initiatives(mapping_data)
-    mapping = MappingOutput(**mapping_data)
+    outcomes_kpis_data = call_llm_json(OUTCOMES_KPIS_PROMPT, user_prompt)
+    outcomes_kpis_data = normalize_outcomes_kpis(outcomes_kpis_data)
+    outcomes_kpis = OutcomesKPIsOutput(**outcomes_kpis_data)
 
-    return {
-        "mapping": mapping.model_dump()
+    return outcomes_kpis.model_dump()
+
+
+def generate_strategy_initiatives(payload: StrategyInitiativesInput):
+    base_context = build_strategy_context_from_mapping_input(payload)
+    framing = payload.framing
+    outcomes = [o.model_dump() if hasattr(o, "model_dump") else o for o in payload.outcomes]
+    kpis = [k.model_dump() if hasattr(k, "model_dump") else k for k in payload.kpis]
+
+    user_prompt = f"""
+Gere iniciativas executáveis para mover os KPIs e atingir os outcomes.
+
+Framing:
+{json.dumps(framing, ensure_ascii=False)}
+
+Outcomes:
+{json.dumps(outcomes, ensure_ascii=False)}
+
+KPIs:
+{json.dumps(kpis, ensure_ascii=False)}
+
+Materiais originais:
+{base_context}
+"""
+    initiatives_data = call_llm_json(INITIATIVES_PROMPT, user_prompt)
+    initiatives_data = normalize_initiatives(initiatives_data)
+
+    prioritized = prioritize_initiatives(initiatives_data)
+    strategy_graph = rebuild_strategy_graph(outcomes, kpis, prioritized.get("initiatives", []))
+
+    initiatives_result = {
+        "initiatives": prioritized.get("initiatives", []),
+        "strategy_graph": strategy_graph,
     }
 
+    initiatives = InitiativesOutput(**initiatives_result)
 
-def generate_kpi_screen(payload: KPIScreenInput):
-    result = build_kpi_screen(payload.mapping)
-    kpi_screen = KPIScreenOutput(**result)
-
-    return {
-        "kpis": kpi_screen.kpis,
-        "summary": kpi_screen.summary,
-    }
+    return initiatives.model_dump()
 
 
 def generate_strategy_review(payload: StrategyReviewInput):
     framing = payload.framing
-    mapping = payload.mapping
+    outcomes = [o.model_dump() if hasattr(o, "model_dump") else o for o in payload.outcomes]
+    kpis = [k.model_dump() if hasattr(k, "model_dump") else k for k in payload.kpis]
+    initiatives = [i.model_dump() if hasattr(i, "model_dump") else i for i in payload.initiatives]
+    strategy_graph = payload.strategy_graph
 
     kpi_user_prompt = f"""
 Revise a camada de KPIs com rigor e governança.
@@ -862,7 +512,7 @@ Revise a camada de KPIs com rigor e governança.
 Retorne apenas JSON válido e compacto.
 
 KPIs:
-{json.dumps(mapping.get("kpis", []), ensure_ascii=False)}
+{json.dumps(kpis, ensure_ascii=False)}
 """
     kpi_data = call_llm_json(KPI_PROMPT, kpi_user_prompt)
     kpi_integrity = KPIIntegrityOutput(**kpi_data)
@@ -879,16 +529,16 @@ Contradições:
 {json.dumps(framing.get("contradictions", []), ensure_ascii=False)}
 
 Outcomes:
-{json.dumps(mapping.get("outcomes", []), ensure_ascii=False)}
+{json.dumps(outcomes, ensure_ascii=False)}
 
 KPIs:
-{json.dumps(mapping.get("kpis", []), ensure_ascii=False)}
+{json.dumps(kpis, ensure_ascii=False)}
 
 Iniciativas:
-{json.dumps(mapping.get("initiatives", []), ensure_ascii=False)}
+{json.dumps(initiatives, ensure_ascii=False)}
 
 Strategy graph:
-{json.dumps(mapping.get("strategy_graph", {}), ensure_ascii=False)}
+{json.dumps(strategy_graph, ensure_ascii=False)}
 """
     portfolio_data = call_llm_json(PORTFOLIO_PROMPT, portfolio_user_prompt)
     portfolio = PortfolioOutput(**portfolio_data)
@@ -901,8 +551,14 @@ Retorne apenas JSON válido e compacto.
 Framing:
 {json.dumps(framing, ensure_ascii=False)}
 
-Mapping:
-{json.dumps(mapping, ensure_ascii=False)}
+Outcomes:
+{json.dumps(outcomes, ensure_ascii=False)}
+
+KPIs:
+{json.dumps(kpis, ensure_ascii=False)}
+
+Iniciativas:
+{json.dumps(initiatives, ensure_ascii=False)}
 
 KPI Integrity:
 {json.dumps(kpi_integrity.model_dump(), ensure_ascii=False)}
@@ -919,18 +575,20 @@ Portfolio:
         "narrative": narrative.model_dump(),
     }
 
-    review_result["guardrails"] = generate_guardrail_summary(payload.performance_constraints or [])
-
     score = calculate_strategy_score(
         core_result={
             "framing": framing,
-            "mapping": mapping,
+            "mapping": {
+                "outcomes": outcomes,
+                "kpis": kpis,
+                "initiatives": initiatives,
+                "strategy_graph": strategy_graph,
+            },
         },
         review_result=review_result,
     )
 
     review_result["strategy_score"] = score
-
     return review_result
 
 
@@ -941,7 +599,7 @@ def run_full_strategy_analysis(payload: StrategyInput):
     framing_result = generate_strategy_framing(payload)
     framing = framing_result["framing"]
 
-    mapping_payload = StrategyMappingInput(
+    outcomes_kpis_payload = StrategyOutcomesKPIsInput(
         framing=framing,
         company_name=payload.company_name,
         company_context=payload.company_context,
@@ -958,32 +616,61 @@ def run_full_strategy_analysis(payload: StrategyInput):
         performance_constraints_text=payload.performance_constraints_text,
         performance_constraints=payload.performance_constraints,
     )
+    outcomes_kpis_result = generate_strategy_outcomes_kpis(outcomes_kpis_payload)
+    outcomes = outcomes_kpis_result["outcomes"]
+    kpis = outcomes_kpis_result["kpis"]
 
-    mapping_result = generate_strategy_mapping(mapping_payload)
-    mapping = mapping_result["mapping"]
+    initiatives_payload = StrategyInitiativesInput(
+        framing=framing,
+        outcomes=outcomes,
+        kpis=kpis,
+        company_name=payload.company_name,
+        company_context=payload.company_context,
+        annual_plan_text=payload.annual_plan_text,
+        financial_model_text=payload.financial_model_text,
+        market_analysis_text=payload.market_analysis_text,
+        leadership_notes_text=payload.leadership_notes_text,
+        kpi_targets_text=payload.kpi_targets_text,
+        scenario_assumptions_text=payload.scenario_assumptions_text,
+        industry_reports_text=payload.industry_reports_text,
+        competitor_landscape_text=payload.competitor_landscape_text,
+        market_benchmarks_text=payload.market_benchmarks_text,
+        customer_research_text=payload.customer_research_text,
+        performance_constraints_text=payload.performance_constraints_text,
+        performance_constraints=payload.performance_constraints,
+    )
+    initiatives_result = generate_strategy_initiatives(initiatives_payload)
+    initiatives = initiatives_result["initiatives"]
+    strategy_graph = initiatives_result["strategy_graph"]
 
     review_payload = StrategyReviewInput(
         framing=framing,
-        mapping=mapping,
+        outcomes=outcomes,
+        kpis=kpis,
+        initiatives=initiatives,
+        strategy_graph=strategy_graph,
         performance_constraints=payload.performance_constraints,
     )
-
     review_result = generate_strategy_review(review_payload)
 
     executive_summary = build_executive_summary(
         payload=payload,
         framing=framing,
-        mapping=mapping,
+        outcomes=outcomes,
+        kpis=kpis,
+        initiatives=initiatives,
         review=review_result,
     )
 
     return {
         "framing": framing,
-        "mapping": mapping,
+        "outcomes": outcomes,
+        "kpis": kpis,
+        "initiatives": initiatives,
+        "strategy_graph": strategy_graph,
         "kpi_integrity": review_result["kpi_integrity"],
         "portfolio": review_result["portfolio"],
         "narrative": review_result["narrative"],
-        "guardrails": review_result["guardrails"],
         "strategy_score": review_result["strategy_score"],
         "executive_summary": executive_summary,
     }
