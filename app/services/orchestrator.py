@@ -237,13 +237,18 @@ def normalize_outcomes_kpis(data: dict) -> dict:
         if not name:
             continue
 
+        linked_theme = str(outcome.get("linked_theme", "")).strip()
+        target = str(outcome.get("target", "")).strip()
+        timeframe = str(outcome.get("timeframe", "")).strip() or "12 meses"
+        value_driver = str(outcome.get("value_driver", "")).strip() or "receita"
+
         normalized_outcomes.append(
             {
                 "name": name,
-                "linked_theme": str(outcome.get("linked_theme", "")).strip(),
-                "target": str(outcome.get("target", "")).strip(),
-                "timeframe": str(outcome.get("timeframe", "")).strip(),
-                "value_driver": str(outcome.get("value_driver", "")).strip(),
+                "linked_theme": linked_theme,
+                "target": target,
+                "timeframe": timeframe,
+                "value_driver": value_driver,
             }
         )
         outcome_names.add(name)
@@ -255,7 +260,28 @@ def normalize_outcomes_kpis(data: dict) -> dict:
         if not isinstance(kpi, dict):
             continue
 
+        name = str(kpi.get("name", "")).strip()
+        if not name:
+            continue
+
+        raw_type = str(kpi.get("type", "")).strip().lower()
+        if "lag" in raw_type:
+            kpi_type = "lagging"
+        else:
+            kpi_type = "leading"
+
+        raw_level = str(kpi.get("level", "")).strip().lower()
+        if "north" in raw_level:
+            level = "north_star"
+        elif "support" in raw_level:
+            level = "supporting"
+        else:
+            level = "driver"
+
         linked_outcomes = _dict_values_as_list(kpi.get("linked_outcomes", []))
+        if isinstance(linked_outcomes, str):
+            linked_outcomes = [linked_outcomes]
+
         linked_outcomes = [
             str(x).strip() for x in linked_outcomes
             if str(x).strip() in outcome_names
@@ -265,19 +291,19 @@ def normalize_outcomes_kpis(data: dict) -> dict:
         parent_kpi = str(parent_kpi).strip() if parent_kpi is not None else None
 
         item = {
-            "name": str(kpi.get("name", "")).strip(),
-            "type": str(kpi.get("type", "")).strip().lower(),
-            "level": str(kpi.get("level", "")).strip().lower(),
+            "name": name,
+            "type": kpi_type,
+            "level": level,
             "linked_outcomes": linked_outcomes,
             "parent_kpi": parent_kpi if parent_kpi else None,
-            "target": str(kpi.get("target", "")).strip(),
-            "owner": str(kpi.get("owner", "")).strip(),
-            "formula": str(kpi.get("formula", "")).strip(),
-            "source": str(kpi.get("source", "")).strip(),
+            "target": str(kpi.get("target", "")).strip() or "",
+            "owner": str(kpi.get("owner", "")).strip() or "Estratégia",
+            "formula": str(kpi.get("formula", "")).strip() or "Definir fórmula",
+            "source": str(kpi.get("source", "")).strip() or "Fonte a definir",
         }
+
         normalized_kpis.append(item)
-        if item["name"]:
-            kpi_names.add(item["name"])
+        kpi_names.add(name)
 
     for kpi in normalized_kpis:
         if kpi["parent_kpi"] and kpi["parent_kpi"] not in kpi_names:
@@ -295,10 +321,14 @@ def enforce_kpi_hierarchy(outcomes: list, kpis: list) -> list:
             by_outcome[outcome_name].append(kpi)
 
     fixed = []
+    seen_names = set()
 
     for outcome in outcomes:
         outcome_name = outcome["name"]
         group = by_outcome.get(outcome_name, [])
+
+        if not group:
+            continue
 
         lagging_roots = [
             k for k in group
@@ -310,33 +340,32 @@ def enforce_kpi_hierarchy(outcomes: list, kpis: list) -> list:
             if lagging_candidates:
                 lagging_candidates[0]["parent_kpi"] = None
                 lagging_roots = [lagging_candidates[0]]
+            else:
+                # promove o primeiro KPI a lagging root para não quebrar
+                group[0]["type"] = "lagging"
+                group[0]["level"] = "north_star"
+                group[0]["parent_kpi"] = None
+                lagging_roots = [group[0]]
 
-        root_name = lagging_roots[0]["name"] if lagging_roots else None
+        root_name = lagging_roots[0]["name"]
 
         for k in group:
             item = dict(k)
 
             if item["name"] == root_name:
-                item["level"] = "north_star" if item.get("level") not in {"north_star", "driver"} else item["level"]
+                item["level"] = "north_star"
                 item["parent_kpi"] = None
             else:
-                if not item.get("parent_kpi") and root_name:
+                if not item.get("parent_kpi"):
                     item["parent_kpi"] = root_name
                 if item.get("level") == "north_star":
                     item["level"] = "driver"
 
-            fixed.append(item)
+            if item["name"] not in seen_names:
+                fixed.append(item)
+                seen_names.add(item["name"])
 
-    seen = set()
-    deduped = []
-    for item in fixed:
-        key = item["name"]
-        if key in seen:
-            continue
-        seen.add(key)
-        deduped.append(item)
-
-    return deduped
+    return fixed
 
 
 # =========================================================
