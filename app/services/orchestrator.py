@@ -153,6 +153,52 @@ def framing_is_incomplete(framing_data: dict) -> bool:
 
     return False
 
+def enforce_kpi_quality(kpis: list) -> list:
+    fixed = []
+
+    for kpi in kpis:
+        item = dict(kpi)
+        flags = []
+
+        name = str(item.get("name", "")).strip().lower()
+        owner = str(item.get("owner", "")).strip().lower()
+        formula = str(item.get("formula", "")).strip().lower()
+        source = str(item.get("source", "")).strip().lower()
+
+        if not formula or formula in {"definir fórmula", "definir formula", "a definir"}:
+            flags.append("missing_formula")
+
+        if not source or source in {"fonte a definir", "a definir"}:
+            flags.append("generic_source")
+
+        if not owner or owner in {"estratégia", "estrategia"}:
+            flags.append("generic_owner")
+
+        if "kpi principal" in name:
+            flags.append("auto_generated_kpi")
+
+        if any(term in name for term in ["melhorar resultado", "indicador principal", "kpi principal genérico"]):
+            flags.append("placeholder_kpi")
+
+        # score simples de qualidade
+        score = 100
+        if "missing_formula" in flags:
+            score -= 30
+        if "generic_source" in flags:
+            score -= 20
+        if "generic_owner" in flags:
+            score -= 15
+        if "placeholder_kpi" in flags:
+            score -= 20
+        if "auto_generated_kpi" in flags:
+            score -= 10
+
+        item["quality_flags"] = flags
+        item["quality_score"] = max(score, 0)
+
+        fixed.append(item)
+
+    return fixed
 
 def enrich_framing_if_incomplete(framing_data: dict, base_context: str) -> dict:
     if not framing_is_incomplete(framing_data):
@@ -602,7 +648,7 @@ Materiais originais:
     data = normalize_outcomes_kpis(data)
     data["kpis"] = enforce_outcome_kpi_coverage(data["outcomes"], data["kpis"])
     data["kpis"] = enforce_kpi_hierarchy(data["outcomes"], data["kpis"])
-
+    data["kpis"] = enforce_kpi_quality(data["kpis"])
     outcomes_kpis = OutcomesKPIsOutput(**data)
     return outcomes_kpis.model_dump()
 

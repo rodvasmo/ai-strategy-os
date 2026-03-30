@@ -184,6 +184,9 @@ class KPI(BaseModel):
     formula: str
     source: str
 
+    quality_flags: Optional[List[str]] = None
+    quality_score: Optional[int] = None
+
 
 class OutcomesKPIsOutput(BaseModel):
     outcomes: List[Outcome]
