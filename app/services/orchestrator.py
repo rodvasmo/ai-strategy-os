@@ -88,6 +88,13 @@ def _normalize_string_list(values):
     return [x for x in normalized if x]
 
 
+def _truncate_text(text: str, limit: int = 12000) -> str:
+    text = str(text or "").strip()
+    if len(text) <= limit:
+        return text
+    return text[:limit] + "\n...[contexto truncado]"
+
+
 # =========================================================
 # FRAMING
 # =========================================================
@@ -446,55 +453,60 @@ def enforce_kpi_quality(kpis: list) -> list:
     return fixed
 
 
-def build_outcome_kpi_guidelines(outcomes: list) -> str:
+def build_theme_kpi_guidelines(framing: dict) -> str:
     guidelines = []
 
-    for outcome in outcomes:
-        name = outcome["name"].lower()
+    for theme in framing.get("strategic_themes", []):
+        theme_text = f"{theme.get('name', '')} {theme.get('description', '')}".lower()
 
-        if "estoque" in name or "capital" in name:
+        if any(word in theme_text for word in ["estoque", "capital", "giro", "margem"]):
             guidelines.append("""
-Para este tipo de outcome (estoque/capital de giro), considere incluir:
+Para temas de estoque/capital de giro, considere incluir:
 - Giro de estoque
 - Dias de estoque
 - Percentual de estoque parado
 - Ruptura de produtos prioritários
+- Mix de produtos de baixa e alta rotação
 """)
 
-        if "churn" in name or "retenção" in name or "retencao" in name:
+        if any(word in theme_text for word in ["churn", "retenção", "retencao", "fidelização", "fidelizacao"]):
             guidelines.append("""
-Para este tipo de outcome (churn/retenção), considere incluir:
-- Taxa de reativação
+Para temas de retenção/churn, considere incluir:
+- Taxa de churn
+- Taxa de renovação
 - Frequência de compra
 - Uso de benefícios
-- Engajamento da base
+- Engajamento da base ativa
 """)
 
-        if "receita" in name or "recorrente" in name:
+        if any(word in theme_text for word in ["receita", "recorrência", "recorrencia", "assinatura", "clube"]):
             guidelines.append("""
-Para este tipo de outcome (receita), considere incluir:
-- Base ativa
-- Ticket médio
-- Frequência de compra
-- Conversão para recorrência
+Para temas de receita recorrente/clube, considere incluir:
+- Receita recorrente mensal
+- Número de assinantes ativos
+- Ticket médio por assinante
+- Conversão para assinatura
+- Taxa de upgrade ou upsell
 """)
 
-        if "engajamento" in name or "comunidade" in name:
+        if any(word in theme_text for word in ["digital", "crm", "automação", "automacao", "comercial", "upsell"]):
             guidelines.append("""
-Para este tipo de outcome (engajamento/comunidade), considere incluir:
-- Participação ativa (% da base)
-- Frequência de interação
-- Retenção da comunidade
-- Engajamento por canal (eventos, app, CRM)
-""")
-
-        if "comercial" in name or "upsell" in name:
-            guidelines.append("""
-Para este tipo de outcome (comercial/upsell), considere incluir:
+Para temas comerciais/digitais, considere incluir:
+- Conversão de leads
 - Receita incremental na base existente
 - Taxa de aceitação de upsell
-- Conversão de campanhas de cross-sell
-- Frequência de recompra
+- Adoção de CRM
+- Eficiência de campanhas
+""")
+
+        if any(word in theme_text for word in ["comunidade", "engajamento", "experiência", "experiencia", "eventos"]):
+            guidelines.append("""
+Para temas de comunidade/experiência, considere incluir:
+- Participação ativa em eventos
+- Frequência de interação
+- Engajamento por canal
+- Retenção da comunidade
+- NPS ou satisfação como métrica complementar, não única
 """)
 
     return "\n".join(sorted(set(guidelines)))
@@ -687,9 +699,30 @@ Materiais:
 
 def generate_strategy_outcomes_kpis(payload: StrategyOutcomesKPIsInput):
     base_context = build_strategy_context_from_mapping_input(payload)
+    base_context = _truncate_text(base_context, 12000)
     framing = payload.framing
+    guidelines = build_theme_kpi_guidelines(framing)
 
-    base_user_prompt = f"""
+    rich_user_prompt = f"""
+Gere outcomes e KPI hierarchy com ligação causal explícita a partir do framing estratégico.
+
+Framing:
+{json.dumps(framing, ensure_ascii=False)}
+
+Materiais originais:
+{base_context}
+
+DIRETRIZES ADICIONAIS DE MODELAGEM:
+{guidelines}
+
+IMPORTANTE:
+- Não gere apenas 1 KPI genérico por outcome se houver drivers claros disponíveis.
+- Para outcomes operacionais, inclua drivers mensuráveis e não apenas o KPI final.
+- Prefira KPIs acionáveis por times reais.
+- Evite placeholders como "Definir fórmula", "A definir" ou owner genérico.
+"""
+
+    simple_user_prompt = f"""
 Gere outcomes e KPI hierarchy com ligação causal explícita a partir do framing estratégico.
 
 Framing:
@@ -699,25 +732,12 @@ Materiais originais:
 {base_context}
 """
 
-    first_pass_raw = call_llm_json(OUTCOMES_KPIS_PROMPT, base_user_prompt)
-    first_pass_data = normalize_outcomes_kpis(first_pass_raw)
+    try:
+        data = call_llm_json(OUTCOMES_KPIS_PROMPT, rich_user_prompt)
+    except Exception:
+        data = call_llm_json(OUTCOMES_KPIS_PROMPT, simple_user_prompt)
 
-    guidelines = build_outcome_kpi_guidelines(first_pass_data.get("outcomes", []))
-
-    enhanced_user_prompt = f"""
-{base_user_prompt}
-
-DIRETRIZES ADICIONAIS DE MODELAGEM:
-{guidelines}
-
-IMPORTANTE:
-- Não gere apenas 1 KPI genérico por outcome se houver drivers claros disponíveis.
-- Para outcomes operacionais, inclua drivers mensuráveis e não apenas o KPI final.
-- Prefira KPIs acionáveis por times reais.
-"""
-
-    final_raw = call_llm_json(OUTCOMES_KPIS_PROMPT, enhanced_user_prompt)
-    data = normalize_outcomes_kpis(final_raw)
+    data = normalize_outcomes_kpis(data)
     data["kpis"] = enforce_outcome_kpi_coverage(data["outcomes"], data["kpis"])
     data["kpis"] = enforce_kpi_hierarchy(data["outcomes"], data["kpis"])
     data["kpis"] = enforce_kpi_quality(data["kpis"])
@@ -728,6 +748,7 @@ IMPORTANTE:
 
 def generate_strategy_initiatives(payload: StrategyInitiativesInput):
     base_context = build_strategy_context_from_mapping_input(payload)
+    base_context = _truncate_text(base_context, 12000)
     framing = payload.framing
     outcomes = payload.outcomes
     kpis = payload.kpis
