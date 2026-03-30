@@ -107,6 +107,11 @@ class StrategyReviewInput(BaseModel):
     performance_constraints: List[Guardrail] = Field(default_factory=list)
 
 
+class KPIScreenInput(BaseModel):
+    framing: Dict[str, Any]
+    mapping: Dict[str, Any]
+
+
 # =========================================================
 # FILE INGESTION
 # =========================================================
@@ -194,6 +199,37 @@ class MappingOutput(BaseModel):
     kpis: List[KPI]
     initiatives: List[Initiative]
     strategy_graph: Dict[str, StrategyGraphNode]
+
+
+# =========================================================
+# KPI SCREEN
+# =========================================================
+class KPILinkedInitiative(BaseModel):
+    name: str
+    owner: str
+    status: str
+    time_horizon: str
+    expected_impact: str
+    priority_band: Optional[str] = None
+    priority_score: Optional[int] = None
+
+
+class KPIView(BaseModel):
+    name: str
+    type: str
+    target: str
+    owner: str
+    formula: str
+    source: str
+    linked_outcomes: List[str] = Field(default_factory=list)
+    linked_initiatives: List[KPILinkedInitiative] = Field(default_factory=list)
+    coverage_score: int = 0
+    coverage_status: str = "baixo"
+
+
+class KPIScreenOutput(BaseModel):
+    kpis: List[KPIView]
+    summary: Dict[str, Any]
 
 
 # =========================================================

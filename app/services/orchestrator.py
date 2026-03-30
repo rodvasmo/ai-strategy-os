@@ -8,11 +8,13 @@ from app.models.schemas import (
     StrategyInput,
     StrategyMappingInput,
     StrategyReviewInput,
+    KPIScreenInput,
     FramingOutput,
     MappingOutput,
     KPIIntegrityOutput,
     PortfolioOutput,
     NarrativeOutput,
+    KPIScreenOutput,
 )
 from app.services.parser import (
     build_framing_context,
@@ -84,6 +86,26 @@ def _normalize_string_list(values):
         normalized.append(str(item))
 
     return [x for x in normalized if x]
+
+
+def _safe_lower(value):
+    return str(value or "").strip().lower()
+
+
+def _unique_keep_order(values):
+    seen = set()
+    result = []
+
+    for item in values:
+        clean = str(item or "").strip()
+        if not clean:
+            continue
+        if clean in seen:
+            continue
+        seen.add(clean)
+        result.append(clean)
+
+    return result
 
 
 # =========================================================
@@ -567,6 +589,134 @@ def ensure_mapping_balance(mapping_data: dict, framing_data: dict) -> dict:
     return mapping_data
 
 
+# =========================================================
+# KPI SCREEN BUILDER
+# =========================================================
+def _infer_coverage_score(linked_initiatives_count: int, linked_outcomes_count: int) -> int:
+    score = 0
+
+    if linked_initiatives_count >= 3:
+        score += 60
+    elif linked_initiatives_count == 2:
+        score += 45
+    elif linked_initiatives_count == 1:
+        score += 25
+
+    if linked_outcomes_count >= 2:
+        score += 40
+    elif linked_outcomes_count == 1:
+        score += 20
+
+    return min(score, 100)
+
+
+def _infer_coverage_status(score: int) -> str:
+    if score >= 75:
+        return "alto"
+    if score >= 45:
+        return "medio"
+    return "baixo"
+
+
+def build_kpi_screen(mapping: dict) -> dict:
+    mapping = dict(mapping or {})
+
+    kpis = mapping.get("kpis", []) or []
+    initiatives = mapping.get("initiatives", []) or []
+    strategy_graph = mapping.get("strategy_graph", {}) or {}
+
+    kpi_to_outcomes = defaultdict(list)
+    kpi_to_initiatives = defaultdict(list)
+
+    for initiative in initiatives:
+        initiative_name = str(initiative.get("name", "")).strip()
+        if not initiative_name:
+            continue
+
+        graph_node = strategy_graph.get(initiative_name, {}) or {}
+        outcome_name = str(graph_node.get("outcome", "")).strip()
+        leading_kpi = str(graph_node.get("kpi_leading", "")).strip()
+        lagging_kpi = str(graph_node.get("kpi_lagging", "")).strip()
+
+        if outcome_name:
+            if leading_kpi:
+                kpi_to_outcomes[leading_kpi].append(outcome_name)
+            if lagging_kpi:
+                kpi_to_outcomes[lagging_kpi].append(outcome_name)
+
+        initiative_payload = {
+            "name": initiative_name,
+            "owner": str(initiative.get("owner", "")).strip(),
+            "status": str(initiative.get("status", "")).strip(),
+            "time_horizon": str(initiative.get("time_horizon", "")).strip(),
+            "expected_impact": str(initiative.get("expected_impact", "")).strip(),
+            "priority_band": initiative.get("priority_band"),
+            "priority_score": initiative.get("priority_score"),
+        }
+
+        if leading_kpi:
+            kpi_to_initiatives[leading_kpi].append(initiative_payload)
+
+        if lagging_kpi:
+            kpi_to_initiatives[lagging_kpi].append(initiative_payload)
+
+    kpi_views = []
+
+    for kpi in kpis:
+        kpi_name = str(kpi.get("name", "")).strip()
+        if not kpi_name:
+            continue
+
+        linked_outcomes = _unique_keep_order(kpi_to_outcomes.get(kpi_name, []))
+
+        raw_linked_initiatives = kpi_to_initiatives.get(kpi_name, [])
+        deduped_initiatives = []
+        seen_names = set()
+
+        for item in raw_linked_initiatives:
+            item_name = str(item.get("name", "")).strip()
+            if not item_name or item_name in seen_names:
+                continue
+            seen_names.add(item_name)
+            deduped_initiatives.append(item)
+
+        coverage_score = _infer_coverage_score(
+            linked_initiatives_count=len(deduped_initiatives),
+            linked_outcomes_count=len(linked_outcomes),
+        )
+        coverage_status = _infer_coverage_status(coverage_score)
+
+        kpi_views.append(
+            {
+                "name": kpi_name,
+                "type": str(kpi.get("type", "")).strip(),
+                "target": str(kpi.get("target", "")).strip(),
+                "owner": str(kpi.get("owner", "")).strip(),
+                "formula": str(kpi.get("formula", "")).strip(),
+                "source": str(kpi.get("source", "")).strip(),
+                "linked_outcomes": linked_outcomes,
+                "linked_initiatives": deduped_initiatives,
+                "coverage_score": coverage_score,
+                "coverage_status": coverage_status,
+            }
+        )
+
+    total = len(kpi_views)
+    leading_count = sum(1 for x in kpi_views if _safe_lower(x.get("type")) == "leading")
+    lagging_count = sum(1 for x in kpi_views if _safe_lower(x.get("type")) == "lagging")
+    avg_coverage = round(sum(x["coverage_score"] for x in kpi_views) / total) if total else 0
+
+    return {
+        "kpis": kpi_views,
+        "summary": {
+            "total_kpis": total,
+            "leading_kpis": leading_count,
+            "lagging_kpis": lagging_count,
+            "average_coverage_score": avg_coverage,
+        },
+    }
+
+
 def generate_guardrail_summary(constraints):
     if not constraints:
         return {"summary": "Nenhum guardrail informado", "guardrails": []}
@@ -689,6 +839,16 @@ Materiais originais:
 
     return {
         "mapping": mapping.model_dump()
+    }
+
+
+def generate_kpi_screen(payload: KPIScreenInput):
+    result = build_kpi_screen(payload.mapping)
+    kpi_screen = KPIScreenOutput(**result)
+
+    return {
+        "kpis": kpi_screen.kpis,
+        "summary": kpi_screen.summary,
     }
 
 

@@ -7,6 +7,7 @@ from app.models.schemas import (
     StrategyInput,
     StrategyMappingInput,
     StrategyReviewInput,
+    KPIScreenInput,
     StrategyFileIngestResponse,
     FullStrategyAnalysisResponse,
 )
@@ -14,6 +15,7 @@ from app.services.orchestrator import (
     generate_strategy_framing,
     generate_strategy_mapping,
     generate_strategy_review,
+    generate_kpi_screen,
     run_full_strategy_analysis,
 )
 from app.services.parser import extract_text_from_upload
@@ -33,6 +35,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 
 @app.get("/")
 def root():
@@ -102,6 +105,14 @@ def strategy_framing(payload: StrategyInput):
 def strategy_mapping(payload: StrategyMappingInput):
     try:
         return generate_strategy_mapping(payload)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/generate-kpis")
+def generate_kpis(payload: KPIScreenInput):
+    try:
+        return generate_kpi_screen(payload)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
