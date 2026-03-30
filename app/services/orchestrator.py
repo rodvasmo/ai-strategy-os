@@ -314,6 +314,39 @@ def normalize_outcomes_kpis(data: dict) -> dict:
     return data
 
 
+def enforce_outcome_kpi_coverage(outcomes: list, kpis: list) -> list:
+    kpis_by_outcome = defaultdict(list)
+
+    for kpi in kpis:
+        for outcome_name in kpi.get("linked_outcomes", []):
+            kpis_by_outcome[outcome_name].append(kpi)
+
+    fixed_kpis = list(kpis)
+
+    for outcome in outcomes:
+        outcome_name = outcome["name"]
+        existing = kpis_by_outcome.get(outcome_name, [])
+
+        if existing:
+            continue
+
+        fixed_kpis.append(
+            {
+                "name": f"{outcome_name} - KPI Principal",
+                "type": "lagging",
+                "level": "north_star",
+                "linked_outcomes": [outcome_name],
+                "parent_kpi": None,
+                "target": outcome.get("target", "") or "",
+                "owner": "Estratégia",
+                "formula": "Definir fórmula",
+                "source": "A definir",
+            }
+        )
+
+    return fixed_kpis
+
+
 def enforce_kpi_hierarchy(outcomes: list, kpis: list) -> list:
     by_outcome = defaultdict(list)
     for kpi in kpis:
@@ -341,7 +374,6 @@ def enforce_kpi_hierarchy(outcomes: list, kpis: list) -> list:
                 lagging_candidates[0]["parent_kpi"] = None
                 lagging_roots = [lagging_candidates[0]]
             else:
-                # promove o primeiro KPI a lagging root para não quebrar
                 group[0]["type"] = "lagging"
                 group[0]["level"] = "north_star"
                 group[0]["parent_kpi"] = None
@@ -568,6 +600,7 @@ Materiais originais:
 """
     data = call_llm_json(OUTCOMES_KPIS_PROMPT, user_prompt)
     data = normalize_outcomes_kpis(data)
+    data["kpis"] = enforce_outcome_kpi_coverage(data["outcomes"], data["kpis"])
     data["kpis"] = enforce_kpi_hierarchy(data["outcomes"], data["kpis"])
 
     outcomes_kpis = OutcomesKPIsOutput(**data)
