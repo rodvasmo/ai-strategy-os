@@ -153,52 +153,6 @@ def framing_is_incomplete(framing_data: dict) -> bool:
 
     return False
 
-def enforce_kpi_quality(kpis: list) -> list:
-    fixed = []
-
-    for kpi in kpis:
-        item = dict(kpi)
-        flags = []
-
-        name = str(item.get("name", "")).strip().lower()
-        owner = str(item.get("owner", "")).strip().lower()
-        formula = str(item.get("formula", "")).strip().lower()
-        source = str(item.get("source", "")).strip().lower()
-
-        if not formula or formula in {"definir fórmula", "definir formula", "a definir"}:
-            flags.append("missing_formula")
-
-        if not source or source in {"fonte a definir", "a definir"}:
-            flags.append("generic_source")
-
-        if not owner or owner in {"estratégia", "estrategia"}:
-            flags.append("generic_owner")
-
-        if "kpi principal" in name:
-            flags.append("auto_generated_kpi")
-
-        if any(term in name for term in ["melhorar resultado", "indicador principal", "kpi principal genérico"]):
-            flags.append("placeholder_kpi")
-
-        # score simples de qualidade
-        score = 100
-        if "missing_formula" in flags:
-            score -= 30
-        if "generic_source" in flags:
-            score -= 20
-        if "generic_owner" in flags:
-            score -= 15
-        if "placeholder_kpi" in flags:
-            score -= 20
-        if "auto_generated_kpi" in flags:
-            score -= 10
-
-        item["quality_flags"] = flags
-        item["quality_score"] = max(score, 0)
-
-        fixed.append(item)
-
-    return fixed
 
 def enrich_framing_if_incomplete(framing_data: dict, base_context: str) -> dict:
     if not framing_is_incomplete(framing_data):
@@ -446,6 +400,106 @@ def enforce_kpi_hierarchy(outcomes: list, kpis: list) -> list:
     return fixed
 
 
+def enforce_kpi_quality(kpis: list) -> list:
+    fixed = []
+
+    for kpi in kpis:
+        item = dict(kpi)
+        flags = []
+
+        name = str(item.get("name", "")).strip().lower()
+        owner = str(item.get("owner", "")).strip().lower()
+        formula = str(item.get("formula", "")).strip().lower()
+        source = str(item.get("source", "")).strip().lower()
+
+        if not formula or formula in {"definir fórmula", "definir formula", "a definir"}:
+            flags.append("missing_formula")
+
+        if not source or source in {"fonte a definir", "a definir"}:
+            flags.append("generic_source")
+
+        if not owner or owner in {"estratégia", "estrategia"}:
+            flags.append("generic_owner")
+
+        if "kpi principal" in name:
+            flags.append("auto_generated_kpi")
+
+        if any(term in name for term in ["melhorar resultado", "indicador principal", "kpi principal genérico"]):
+            flags.append("placeholder_kpi")
+
+        score = 100
+        if "missing_formula" in flags:
+            score -= 30
+        if "generic_source" in flags:
+            score -= 20
+        if "generic_owner" in flags:
+            score -= 15
+        if "placeholder_kpi" in flags:
+            score -= 20
+        if "auto_generated_kpi" in flags:
+            score -= 10
+
+        item["quality_flags"] = flags
+        item["quality_score"] = max(score, 0)
+        fixed.append(item)
+
+    return fixed
+
+
+def build_outcome_kpi_guidelines(outcomes: list) -> str:
+    guidelines = []
+
+    for outcome in outcomes:
+        name = outcome["name"].lower()
+
+        if "estoque" in name or "capital" in name:
+            guidelines.append("""
+Para este tipo de outcome (estoque/capital de giro), considere incluir:
+- Giro de estoque
+- Dias de estoque
+- Percentual de estoque parado
+- Ruptura de produtos prioritários
+""")
+
+        if "churn" in name or "retenção" in name or "retencao" in name:
+            guidelines.append("""
+Para este tipo de outcome (churn/retenção), considere incluir:
+- Taxa de reativação
+- Frequência de compra
+- Uso de benefícios
+- Engajamento da base
+""")
+
+        if "receita" in name or "recorrente" in name:
+            guidelines.append("""
+Para este tipo de outcome (receita), considere incluir:
+- Base ativa
+- Ticket médio
+- Frequência de compra
+- Conversão para recorrência
+""")
+
+        if "engajamento" in name or "comunidade" in name:
+            guidelines.append("""
+Para este tipo de outcome (engajamento/comunidade), considere incluir:
+- Participação ativa (% da base)
+- Frequência de interação
+- Retenção da comunidade
+- Engajamento por canal (eventos, app, CRM)
+""")
+
+        if "comercial" in name or "upsell" in name:
+            guidelines.append("""
+Para este tipo de outcome (comercial/upsell), considere incluir:
+- Receita incremental na base existente
+- Taxa de aceitação de upsell
+- Conversão de campanhas de cross-sell
+- Frequência de recompra
+""")
+
+    return "\n".join(sorted(set(guidelines)))
+
+
 # =========================================================
 # INITIATIVES
 # =========================================================
@@ -635,7 +689,7 @@ def generate_strategy_outcomes_kpis(payload: StrategyOutcomesKPIsInput):
     base_context = build_strategy_context_from_mapping_input(payload)
     framing = payload.framing
 
-    user_prompt = f"""
+    base_user_prompt = f"""
 Gere outcomes e KPI hierarchy com ligação causal explícita a partir do framing estratégico.
 
 Framing:
@@ -644,11 +698,30 @@ Framing:
 Materiais originais:
 {base_context}
 """
-    data = call_llm_json(OUTCOMES_KPIS_PROMPT, user_prompt)
-    data = normalize_outcomes_kpis(data)
+
+    first_pass_raw = call_llm_json(OUTCOMES_KPIS_PROMPT, base_user_prompt)
+    first_pass_data = normalize_outcomes_kpis(first_pass_raw)
+
+    guidelines = build_outcome_kpi_guidelines(first_pass_data.get("outcomes", []))
+
+    enhanced_user_prompt = f"""
+{base_user_prompt}
+
+DIRETRIZES ADICIONAIS DE MODELAGEM:
+{guidelines}
+
+IMPORTANTE:
+- Não gere apenas 1 KPI genérico por outcome se houver drivers claros disponíveis.
+- Para outcomes operacionais, inclua drivers mensuráveis e não apenas o KPI final.
+- Prefira KPIs acionáveis por times reais.
+"""
+
+    final_raw = call_llm_json(OUTCOMES_KPIS_PROMPT, enhanced_user_prompt)
+    data = normalize_outcomes_kpis(final_raw)
     data["kpis"] = enforce_outcome_kpi_coverage(data["outcomes"], data["kpis"])
     data["kpis"] = enforce_kpi_hierarchy(data["outcomes"], data["kpis"])
     data["kpis"] = enforce_kpi_quality(data["kpis"])
+
     outcomes_kpis = OutcomesKPIsOutput(**data)
     return outcomes_kpis.model_dump()
 
