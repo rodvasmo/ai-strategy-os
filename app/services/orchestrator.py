@@ -24,21 +24,20 @@ from app.services.llm import call_llm_json
 from app.services.scoring import calculate_strategy_score
 
 from app.agents.strategy_framing_agent import SYSTEM_PROMPT as FRAMING_PROMPT
+from app.agents.strategy_outcomes_kpis_agent import SYSTEM_PROMPT as OUTCOMES_KPIS_PROMPT
 from app.agents.strategy_initiatives_agent import SYSTEM_PROMPT as INITIATIVES_PROMPT
 from app.agents.kpi_integrity_agent import SYSTEM_PROMPT as KPI_PROMPT
 from app.agents.portfolio_intelligence_agent import SYSTEM_PROMPT as PORTFOLIO_PROMPT
 from app.agents.narrative_agent import SYSTEM_PROMPT as NARRATIVE_PROMPT
 
 
-OUTCOMES_ONLY_PROMPT = """
-Você é um estrategista sênior responsável por transformar um framing estratégico em outcomes executivos claros.
+OUTCOME_KPI_REPAIR_PROMPT = """
+Você é um estrategista sênior especialista em modelagem de KPI hierarchy.
 
-Seu papel nesta etapa é gerar SOMENTE outcomes estratégicos.
-NÃO gere KPIs.
-NÃO gere iniciativas.
+Seu trabalho é corrigir apenas outcomes e KPIs problemáticos.
 
 OBJETIVO:
-Traduzir os strategic_themes em resultados de negócio claros, mensuráveis e úteis para a próxima etapa de KPI hierarchy.
+Dado um conjunto pequeno de outcomes com KPI(s) ruins ou incompletos, gere uma versão corrigida e executável.
 
 REGRAS:
 - Retorne apenas JSON válido
@@ -46,63 +45,27 @@ REGRAS:
 - Não inclua comentários
 - Não inclua texto fora do JSON
 - Todos os campos textuais devem ser strings
-- Gere entre 1 e 2 outcomes por tema
-- Evite outcomes genéricos
-- Outcome deve representar resultado de negócio, não ação
-- Sempre incluir target, timeframe e value_driver
-- linked_theme deve bater exatamente com strategic_theme.name
-- Use somente informações do framing e do contexto
-- Se faltar detalhe, complete de forma plausível e conservadora
-- Não invente geografias, canais, produtos ou frentes não citadas
-
-FORMATO:
-{
-  "outcomes": [
-    {
-      "name": "...",
-      "linked_theme": "...",
-      "target": "...",
-      "timeframe": "12 meses",
-      "value_driver": "receita"
-    }
-  ]
-}
-"""
-
-
-KPI_PER_OUTCOME_PROMPT = """
-Você é um estrategista sênior especializado em modelagem de KPI hierarchy.
-
-Seu trabalho nesta etapa é gerar KPIs para UM outcome específico.
-
-OBJETIVO:
-Construir uma hierarquia causal clara:
-- 1 KPI lagging principal (north star do outcome)
-- 2 a 4 KPIs leading acionáveis
-- todos conectados explicitamente ao outcome informado
-
-REGRAS:
-- Retorne apenas JSON válido
-- Não inclua markdown
-- Não inclua comentários
-- Não inclua texto fora do JSON
-- Todos os campos textuais devem ser strings
-- Gere no mínimo 3 KPIs no total
-- Deve existir exatamente 1 KPI lagging principal
-- Os demais devem ser KPIs leading
-- O KPI lagging principal deve ter parent_kpi = null
-- Os KPIs leading devem apontar parent_kpi para o KPI lagging principal
-- linked_outcomes deve conter o outcome informado
-- Fórmulas devem ser concretas
-- Owners devem ser áreas reais, não "Estratégia"
-- Source deve ser concreta
-- Evite placeholders como:
+- Para cada outcome recebido, gere:
+  - exatamente 1 KPI lagging principal
+  - entre 2 e 4 KPIs leading
+- O KPI lagging deve ter:
+  - type = "lagging"
+  - level = "north_star"
+  - parent_kpi = null
+- Os leading devem ter:
+  - type = "leading"
+  - level = "driver"
+  - parent_kpi = nome do KPI lagging principal
+- Não usar placeholders como:
   - KPI Principal
   - Definir fórmula
+  - Definir formula
   - A definir
   - Indicador principal
-- Evite repetir o nome do outcome como KPI se isso não for uma métrica real
-- KPIs devem ser executáveis e cobrados por um executivo real
+- Fórmulas devem ser concretas
+- Owners devem ser áreas reais
+- Source deve ser concreta
+- linked_outcomes deve conter o outcome correto
 
 FORMATO:
 {
@@ -113,17 +76,6 @@ FORMATO:
       "level": "north_star",
       "linked_outcomes": ["..."],
       "parent_kpi": null,
-      "target": "...",
-      "owner": "...",
-      "formula": "...",
-      "source": "..."
-    },
-    {
-      "name": "...",
-      "type": "leading",
-      "level": "driver",
-      "linked_outcomes": ["..."],
-      "parent_kpi": "...",
       "target": "...",
       "owner": "...",
       "formula": "...",
@@ -340,62 +292,18 @@ def build_outcomes_kpis_context(payload) -> str:
         payload.performance_constraints_text,
         payload.customer_research_text,
     ]
-    return "\n\n".join(
-        [str(p).strip() for p in parts if p and str(p).strip()]
-    )
+    return "\n\n".join([str(p).strip() for p in parts if p and str(p).strip()])
 
 
-def build_outcome_specific_context(payload, outcome: dict) -> str:
-    outcome_name = str(outcome.get("name", "")).lower()
-    theme_name = str(outcome.get("linked_theme", "")).lower()
-
-    selected = [payload.company_context]
-
-    if any(word in f"{outcome_name} {theme_name}" for word in ["receita", "assinatura", "clube", "churn", "reten"]):
-        selected.extend([
-            payload.financial_model_text,
-            payload.kpi_targets_text,
-            payload.customer_research_text,
-            payload.leadership_notes_text,
-        ])
-
-    elif any(word in f"{outcome_name} {theme_name}" for word in ["estoque", "capital", "giro", "margem"]):
-        selected.extend([
-            payload.financial_model_text,
-            payload.kpi_targets_text,
-            payload.leadership_notes_text,
-            payload.performance_constraints_text,
-        ])
-
-    elif any(word in f"{outcome_name} {theme_name}" for word in ["crm", "digital", "comercial", "upsell", "produtividade"]):
-        selected.extend([
-            payload.kpi_targets_text,
-            payload.leadership_notes_text,
-            payload.customer_research_text,
-            payload.financial_model_text,
-        ])
-
-    elif any(word in f"{outcome_name} {theme_name}" for word in ["comunidade", "engajamento", "experiência", "experiencia", "eventos"]):
-        selected.extend([
-            payload.customer_research_text,
-            payload.leadership_notes_text,
-            payload.kpi_targets_text,
-            payload.company_context,
-        ])
-
-    else:
-        selected.extend([
-            payload.financial_model_text,
-            payload.kpi_targets_text,
-            payload.leadership_notes_text,
-        ])
-
-    text = "\n\n".join([str(x).strip() for x in selected if x and str(x).strip()])
-    return _truncate_text(text, 3500)
+def build_repair_context(payload, outcome_names: list[str]) -> str:
+    text = build_outcomes_kpis_context(payload)
+    text = _truncate_text(text, 3000)
+    joined = ", ".join(outcome_names)
+    return f"Outcomes a corrigir: {joined}\n\nContexto relevante:\n{text}"
 
 
 # =========================================================
-# OUTCOMES + KPI HIERARCHY
+# OUTCOMES + KPIS
 # =========================================================
 def normalize_outcomes_kpis(data: dict) -> dict:
     data = dict(data or {})
@@ -441,10 +349,7 @@ def normalize_outcomes_kpis(data: dict) -> dict:
             continue
 
         raw_type = str(kpi.get("type", "")).strip().lower()
-        if "lag" in raw_type:
-            kpi_type = "lagging"
-        else:
-            kpi_type = "leading"
+        kpi_type = "lagging" if "lag" in raw_type else "leading"
 
         raw_level = str(kpi.get("level", "")).strip().lower()
         if "north" in raw_level:
@@ -490,76 +395,101 @@ def normalize_outcomes_kpis(data: dict) -> dict:
     return data
 
 
-def build_theme_kpi_guidelines(framing: dict) -> str:
-    guidelines = []
+def merge_kpi_candidates(kpi_groups: list[list[dict]]) -> list[dict]:
+    merged = {}
 
-    for theme in framing.get("strategic_themes", []):
-        theme_text = f"{theme.get('name', '')} {theme.get('description', '')}".lower()
+    for group in kpi_groups:
+        for kpi in group:
+            key = str(kpi.get("name", "")).strip().lower()
+            if not key:
+                continue
 
-        if any(word in theme_text for word in ["estoque", "capital", "giro", "margem"]):
-            guidelines.append("""
-Para temas de estoque/capital de giro, considere incluir:
-- KPI lagging: capital empatado em estoque ou valor total do estoque
-- KPIs leading: giro de estoque, dias de estoque, percentual de estoque parado, ruptura de produtos prioritários
-- Evite KPI genérico
-""")
+            if key not in merged:
+                merged[key] = dict(kpi)
+                continue
 
-        if any(word in theme_text for word in ["churn", "retenção", "retencao", "fidelização", "fidelizacao"]):
-            guidelines.append("""
-Para temas de retenção/churn, considere incluir:
-- KPI lagging: churn ou taxa de retenção/renovação
-- KPIs leading: NPS/satisfação, uso de benefícios, frequência de compra, engajamento da base
-- Não usar apenas NPS; NPS é driver, não resultado final
-""")
+            existing = merged[key]
+            existing_outcomes = set(existing.get("linked_outcomes", []))
+            new_outcomes = set(kpi.get("linked_outcomes", []))
+            existing["linked_outcomes"] = sorted(existing_outcomes.union(new_outcomes))
 
-        if any(word in theme_text for word in ["receita", "recorrência", "recorrencia", "assinatura", "clube"]):
-            guidelines.append("""
-Para temas de receita recorrente/clube, considere incluir:
-- KPI lagging: MRR/receita recorrente
-- KPIs leading: base ativa, ticket médio, conversão para assinatura, upgrade/upsell
-- Evite misturar KPI de comunidade aqui se o outcome for financeiro
-""")
+            if not existing.get("parent_kpi") and kpi.get("parent_kpi"):
+                existing["parent_kpi"] = kpi.get("parent_kpi")
 
-        if any(word in theme_text for word in ["digital", "crm", "automação", "automacao", "comercial", "upsell"]):
-            guidelines.append("""
-Para temas comerciais/digitais, considere incluir:
-- KPI lagging: produtividade comercial, receita por vendedor, receita incremental, CAC
-- KPIs leading: adoção de CRM, leads qualificados, conversão, campanhas automatizadas
-- Os leading devem ser operacionalizáveis por Marketing/Comercial/TI
-""")
+            if existing.get("type") != "lagging" and kpi.get("type") == "lagging":
+                existing["type"] = "lagging"
 
-        if any(word in theme_text for word in ["comunidade", "engajamento", "experiência", "experiencia", "eventos"]):
-            guidelines.append("""
-Para temas de comunidade/experiência, considere incluir:
-- KPI lagging: participação ativa da base em eventos/comunidade ou retenção da comunidade
-- KPIs leading: frequência de participação, interações, recorrência em eventos, adesão a benefícios
-- NPS pode existir, mas não deve ser o único KPI
-- Evite owner genérico e evite 'kpi principal'
-""")
+            if existing.get("level") != "north_star" and kpi.get("level") == "north_star":
+                existing["level"] = "north_star"
 
-    return "\n".join(sorted(set(guidelines)))
+            if str(existing.get("formula", "")).strip().lower() in {"", "definir fórmula", "definir formula", "a definir"}:
+                existing["formula"] = kpi.get("formula", existing.get("formula"))
+
+            if str(existing.get("source", "")).strip().lower() in {"", "fonte a definir", "a definir"}:
+                existing["source"] = kpi.get("source", existing.get("source"))
+
+            if str(existing.get("owner", "")).strip().lower() in {"", "estratégia", "estrategia"}:
+                existing["owner"] = kpi.get("owner", existing.get("owner"))
+
+    return list(merged.values())
 
 
-def _pick_theme_by_name(framing: dict, theme_name: str) -> dict:
-    for theme in framing.get("strategic_themes", []):
-        if str(theme.get("name", "")).strip() == str(theme_name).strip():
-            return theme
-    return {}
+def enrich_kpi_quality(kpis: list) -> list:
+    fixed = []
+
+    for kpi in kpis:
+        item = dict(kpi)
+        flags = []
+
+        name = str(item.get("name", "")).strip().lower()
+        owner = str(item.get("owner", "")).strip().lower()
+        formula = str(item.get("formula", "")).strip().lower()
+        source = str(item.get("source", "")).strip().lower()
+
+        if not formula or formula in {"definir fórmula", "definir formula", "a definir", "definir fórmula operacional"}:
+            flags.append("missing_formula")
+
+        if not source or source in {"fonte a definir", "a definir", "definir fonte"}:
+            flags.append("generic_source")
+
+        if not owner or owner in {"estratégia", "estrategia", "área responsável", "area responsavel"}:
+            flags.append("generic_owner")
+
+        if "kpi principal" in name:
+            flags.append("auto_generated_kpi")
+
+        if "resultado principal de" in name:
+            flags.append("placeholder_kpi")
+
+        score = 100
+        if "missing_formula" in flags:
+            score -= 30
+        if "generic_source" in flags:
+            score -= 20
+        if "generic_owner" in flags:
+            score -= 15
+        if "placeholder_kpi" in flags:
+            score -= 20
+        if "auto_generated_kpi" in flags:
+            score -= 10
+
+        item["quality_flags"] = flags
+        item["quality_score"] = max(score, 0)
+        fixed.append(item)
+
+    return fixed
 
 
-def _theme_keywords(theme_name: str, outcome_name: str) -> str:
-    return f"{theme_name} {outcome_name}".lower()
-
-
-def build_fallback_kpis_for_outcome(outcome: dict, framing: dict) -> list:
+def build_fallback_kpis_for_outcome(outcome: dict) -> list:
     outcome_name = str(outcome.get("name", "")).strip()
     theme_name = str(outcome.get("linked_theme", "")).strip()
-    text = _theme_keywords(theme_name, outcome_name)
+    text = f"{outcome_name} {theme_name}".lower()
 
     if any(word in text for word in ["receita", "recorrente", "assinatura", "clube"]):
+        root = "Receita recorrente mensal do clube (MRR)"
         return [
             {
-                "name": "Receita recorrente mensal do clube (MRR)",
+                "name": root,
                 "type": "lagging",
                 "level": "north_star",
                 "linked_outcomes": [outcome_name],
@@ -574,7 +504,7 @@ def build_fallback_kpis_for_outcome(outcome: dict, framing: dict) -> list:
                 "type": "leading",
                 "level": "driver",
                 "linked_outcomes": [outcome_name],
-                "parent_kpi": "Receita recorrente mensal do clube (MRR)",
+                "parent_kpi": root,
                 "target": "Expandir base ativa",
                 "owner": "Marketing e Vendas",
                 "formula": "Contagem de assinantes com assinatura ativa no mês",
@@ -585,7 +515,7 @@ def build_fallback_kpis_for_outcome(outcome: dict, framing: dict) -> list:
                 "type": "leading",
                 "level": "driver",
                 "linked_outcomes": [outcome_name],
-                "parent_kpi": "Receita recorrente mensal do clube (MRR)",
+                "parent_kpi": root,
                 "target": "Elevar ticket médio",
                 "owner": "Produto e Marketing",
                 "formula": "Receita recorrente mensal / Número de assinantes ativos",
@@ -596,7 +526,7 @@ def build_fallback_kpis_for_outcome(outcome: dict, framing: dict) -> list:
                 "type": "leading",
                 "level": "driver",
                 "linked_outcomes": [outcome_name],
-                "parent_kpi": "Receita recorrente mensal do clube (MRR)",
+                "parent_kpi": root,
                 "target": "Melhorar conversão",
                 "owner": "Marketing Digital",
                 "formula": "Número de novos assinantes / Número total de leads qualificados",
@@ -605,9 +535,10 @@ def build_fallback_kpis_for_outcome(outcome: dict, framing: dict) -> list:
         ]
 
     if any(word in text for word in ["churn", "retenção", "retencao", "renovação", "renovacao"]):
+        root = "Taxa de churn mensal do clube de assinatura"
         return [
             {
-                "name": "Taxa de churn mensal do clube de assinatura",
+                "name": root,
                 "type": "lagging",
                 "level": "north_star",
                 "linked_outcomes": [outcome_name],
@@ -622,7 +553,7 @@ def build_fallback_kpis_for_outcome(outcome: dict, framing: dict) -> list:
                 "type": "leading",
                 "level": "driver",
                 "linked_outcomes": [outcome_name],
-                "parent_kpi": "Taxa de churn mensal do clube de assinatura",
+                "parent_kpi": root,
                 "target": "Elevar renovação",
                 "owner": "Time de Customer Success",
                 "formula": "Número de assinantes que renovaram / Número de assinantes elegíveis para renovação",
@@ -633,7 +564,7 @@ def build_fallback_kpis_for_outcome(outcome: dict, framing: dict) -> list:
                 "type": "leading",
                 "level": "driver",
                 "linked_outcomes": [outcome_name],
-                "parent_kpi": "Taxa de churn mensal do clube de assinatura",
+                "parent_kpi": root,
                 "target": "Elevar uso dos benefícios",
                 "owner": "Time de Customer Success",
                 "formula": "Percentual de assinantes ativos que usam benefícios e participam de ações",
@@ -644,7 +575,7 @@ def build_fallback_kpis_for_outcome(outcome: dict, framing: dict) -> list:
                 "type": "leading",
                 "level": "driver",
                 "linked_outcomes": [outcome_name],
-                "parent_kpi": "Taxa de churn mensal do clube de assinatura",
+                "parent_kpi": root,
                 "target": "NPS >= 70",
                 "owner": "Customer Success",
                 "formula": "Cálculo de NPS via pesquisa periódica",
@@ -653,9 +584,10 @@ def build_fallback_kpis_for_outcome(outcome: dict, framing: dict) -> list:
         ]
 
     if any(word in text for word in ["estoque", "capital", "giro", "margem"]):
+        root = "Capital empatado em estoque"
         return [
             {
-                "name": "Capital empatado em estoque",
+                "name": root,
                 "type": "lagging",
                 "level": "north_star",
                 "linked_outcomes": [outcome_name],
@@ -670,7 +602,7 @@ def build_fallback_kpis_for_outcome(outcome: dict, framing: dict) -> list:
                 "type": "leading",
                 "level": "driver",
                 "linked_outcomes": [outcome_name],
-                "parent_kpi": "Capital empatado em estoque",
+                "parent_kpi": root,
                 "target": "Elevar giro",
                 "owner": "Gestão de Estoque",
                 "formula": "Custo das mercadorias vendidas anual / Estoque médio anual",
@@ -681,7 +613,7 @@ def build_fallback_kpis_for_outcome(outcome: dict, framing: dict) -> list:
                 "type": "leading",
                 "level": "driver",
                 "linked_outcomes": [outcome_name],
-                "parent_kpi": "Capital empatado em estoque",
+                "parent_kpi": root,
                 "target": "Reduzir dias de estoque",
                 "owner": "Gestão de Estoque",
                 "formula": "Estoque médio / Custo das mercadorias vendidas diário",
@@ -692,7 +624,7 @@ def build_fallback_kpis_for_outcome(outcome: dict, framing: dict) -> list:
                 "type": "leading",
                 "level": "driver",
                 "linked_outcomes": [outcome_name],
-                "parent_kpi": "Capital empatado em estoque",
+                "parent_kpi": root,
                 "target": "Reduzir estoque parado",
                 "owner": "Gestão de Estoque",
                 "formula": "Estoque parado / Estoque total",
@@ -701,9 +633,10 @@ def build_fallback_kpis_for_outcome(outcome: dict, framing: dict) -> list:
         ]
 
     if any(word in text for word in ["comercial", "crm", "digital", "produtividade", "upsell"]):
+        root = "Produtividade comercial (receita por vendedor)"
         return [
             {
-                "name": "Produtividade comercial (receita por vendedor)",
+                "name": root,
                 "type": "lagging",
                 "level": "north_star",
                 "linked_outcomes": [outcome_name],
@@ -718,7 +651,7 @@ def build_fallback_kpis_for_outcome(outcome: dict, framing: dict) -> list:
                 "type": "leading",
                 "level": "driver",
                 "linked_outcomes": [outcome_name],
-                "parent_kpi": "Produtividade comercial (receita por vendedor)",
+                "parent_kpi": root,
                 "target": "90% dos vendedores usando CRM",
                 "owner": "Operações e TI",
                 "formula": "Percentual de vendedores com uso ativo do CRM",
@@ -729,7 +662,7 @@ def build_fallback_kpis_for_outcome(outcome: dict, framing: dict) -> list:
                 "type": "leading",
                 "level": "driver",
                 "linked_outcomes": [outcome_name],
-                "parent_kpi": "Produtividade comercial (receita por vendedor)",
+                "parent_kpi": root,
                 "target": "Expandir campanhas automatizadas",
                 "owner": "Marketing",
                 "formula": "Contagem de campanhas automatizadas enviadas",
@@ -740,7 +673,7 @@ def build_fallback_kpis_for_outcome(outcome: dict, framing: dict) -> list:
                 "type": "leading",
                 "level": "driver",
                 "linked_outcomes": [outcome_name],
-                "parent_kpi": "Produtividade comercial (receita por vendedor)",
+                "parent_kpi": root,
                 "target": "Melhorar conversão",
                 "owner": "Marketing Digital",
                 "formula": "Número de clientes / Número de leads",
@@ -749,9 +682,10 @@ def build_fallback_kpis_for_outcome(outcome: dict, framing: dict) -> list:
         ]
 
     if any(word in text for word in ["comunidade", "engajamento", "experiência", "experiencia", "eventos"]):
+        root = "Participação ativa da base em eventos e comunidade"
         return [
             {
-                "name": "Participação ativa da base em eventos e comunidade",
+                "name": root,
                 "type": "lagging",
                 "level": "north_star",
                 "linked_outcomes": [outcome_name],
@@ -766,7 +700,7 @@ def build_fallback_kpis_for_outcome(outcome: dict, framing: dict) -> list:
                 "type": "leading",
                 "level": "driver",
                 "linked_outcomes": [outcome_name],
-                "parent_kpi": "Participação ativa da base em eventos e comunidade",
+                "parent_kpi": root,
                 "target": "Elevar participação por evento",
                 "owner": "Marketing de Experiências",
                 "formula": "Participantes confirmados / Convites enviados para eventos exclusivos",
@@ -777,7 +711,7 @@ def build_fallback_kpis_for_outcome(outcome: dict, framing: dict) -> list:
                 "type": "leading",
                 "level": "driver",
                 "linked_outcomes": [outcome_name],
-                "parent_kpi": "Participação ativa da base em eventos e comunidade",
+                "parent_kpi": root,
                 "target": "Aumentar interações mensais",
                 "owner": "Comunidade e Conteúdo",
                 "formula": "Total de interações mensais na comunidade / Número de membros ativos",
@@ -788,7 +722,7 @@ def build_fallback_kpis_for_outcome(outcome: dict, framing: dict) -> list:
                 "type": "leading",
                 "level": "driver",
                 "linked_outcomes": [outcome_name],
-                "parent_kpi": "Participação ativa da base em eventos e comunidade",
+                "parent_kpi": root,
                 "target": "Aumentar recorrência",
                 "owner": "Marketing de Experiências",
                 "formula": "Número de participantes recorrentes em eventos / Número total de participantes no período",
@@ -811,47 +745,7 @@ def build_fallback_kpis_for_outcome(outcome: dict, framing: dict) -> list:
     ]
 
 
-def merge_kpi_candidates(kpi_groups: list) -> list:
-    merged = {}
-
-    for group in kpi_groups:
-        for kpi in group:
-            key = str(kpi.get("name", "")).strip().lower()
-            if not key:
-                continue
-
-            if key not in merged:
-                merged[key] = dict(kpi)
-                continue
-
-            existing = merged[key]
-
-            existing_outcomes = set(existing.get("linked_outcomes", []))
-            new_outcomes = set(kpi.get("linked_outcomes", []))
-            existing["linked_outcomes"] = sorted(existing_outcomes.union(new_outcomes))
-
-            if not existing.get("parent_kpi") and kpi.get("parent_kpi"):
-                existing["parent_kpi"] = kpi.get("parent_kpi")
-
-            if existing.get("type") != "lagging" and kpi.get("type") == "lagging":
-                existing["type"] = "lagging"
-
-            if existing.get("level") != "north_star" and kpi.get("level") == "north_star":
-                existing["level"] = "north_star"
-
-            if str(existing.get("formula", "")).strip().lower() in {"", "definir fórmula", "definir formula", "a definir"}:
-                existing["formula"] = kpi.get("formula", existing.get("formula"))
-
-            if str(existing.get("source", "")).strip().lower() in {"", "fonte a definir", "a definir"}:
-                existing["source"] = kpi.get("source", existing.get("source"))
-
-            if str(existing.get("owner", "")).strip().lower() in {"", "estratégia", "estrategia", "área responsável", "area responsavel"}:
-                existing["owner"] = kpi.get("owner", existing.get("owner"))
-
-    return list(merged.values())
-
-
-def enforce_outcome_kpi_coverage(outcomes: list, kpis: list, framing: dict) -> list:
+def enforce_outcome_kpi_coverage(outcomes: list, kpis: list) -> list:
     kpis_by_outcome = defaultdict(list)
 
     for kpi in kpis:
@@ -867,7 +761,7 @@ def enforce_outcome_kpi_coverage(outcomes: list, kpis: list, framing: dict) -> l
         if existing:
             continue
 
-        fixed_kpis.extend(build_fallback_kpis_for_outcome(outcome, framing))
+        fixed_kpis.extend(build_fallback_kpis_for_outcome(outcome))
 
     return fixed_kpis
 
@@ -928,98 +822,108 @@ def enforce_kpi_hierarchy(outcomes: list, kpis: list) -> list:
     return fixed
 
 
-def enrich_kpi_quality(kpis: list) -> list:
-    fixed = []
-
-    for kpi in kpis:
-        item = dict(kpi)
-        flags = []
-
-        name = str(item.get("name", "")).strip().lower()
-        owner = str(item.get("owner", "")).strip().lower()
-        formula = str(item.get("formula", "")).strip().lower()
-        source = str(item.get("source", "")).strip().lower()
-
-        if not formula or formula in {"definir fórmula", "definir formula", "a definir", "definir fórmula operacional"}:
-            flags.append("missing_formula")
-
-        if not source or source in {"fonte a definir", "a definir", "definir fonte"}:
-            flags.append("generic_source")
-
-        if not owner or owner in {"estratégia", "estrategia", "área responsável", "area responsavel"}:
-            flags.append("generic_owner")
-
-        if "kpi principal" in name:
-            flags.append("auto_generated_kpi")
-
-        if "resultado principal de" in name:
-            flags.append("placeholder_kpi")
-
-        score = 100
-        if "missing_formula" in flags:
-            score -= 30
-        if "generic_source" in flags:
-            score -= 20
-        if "generic_owner" in flags:
-            score -= 15
-        if "placeholder_kpi" in flags:
-            score -= 20
-        if "auto_generated_kpi" in flags:
-            score -= 10
-
-        item["quality_flags"] = flags
-        item["quality_score"] = max(score, 0)
-
-        fixed.append(item)
-
-    return fixed
-
-
-def repair_weak_kpis(outcomes: list, kpis: list, framing: dict) -> list:
+def classify_weak_outcomes(outcomes: list, kpis: list) -> list[dict]:
     by_outcome = defaultdict(list)
     for kpi in kpis:
         for outcome_name in kpi.get("linked_outcomes", []):
             by_outcome[outcome_name].append(kpi)
 
-    repaired = []
+    weak = []
 
     for outcome in outcomes:
         group = by_outcome.get(outcome["name"], [])
-
         if not group:
-            repaired.extend(build_fallback_kpis_for_outcome(outcome, framing))
+            weak.append(outcome)
             continue
 
-        group_quality = min([int(k.get("quality_score", 0)) for k in group]) if group else 0
-        bad_placeholder = any(
-            "auto_generated_kpi" in k.get("quality_flags", []) or
-            "placeholder_kpi" in k.get("quality_flags", []) or
-            "missing_formula" in k.get("quality_flags", [])
+        lagging_roots = [k for k in group if k.get("type") == "lagging" and not k.get("parent_kpi")]
+        leading = [k for k in group if k.get("type") == "leading"]
+
+        has_bad_formula = any(
+            str(k.get("formula", "")).strip().lower() in {"", "definir fórmula", "definir formula", "a definir", "definir fórmula operacional"}
+            for k in group
+        )
+        has_bad_source = any(
+            str(k.get("source", "")).strip().lower() in {"", "fonte a definir", "a definir", "definir fonte"}
+            for k in group
+        )
+        has_bad_owner = any(
+            str(k.get("owner", "")).strip().lower() in {"", "estratégia", "estrategia", "área responsável", "area responsavel"}
+            for k in group
+        )
+        has_placeholder_name = any(
+            "kpi principal" in str(k.get("name", "")).strip().lower() or
+            "resultado principal de" in str(k.get("name", "")).strip().lower()
             for k in group
         )
 
-        if group_quality < 70 or bad_placeholder:
-            fallback = build_fallback_kpis_for_outcome(outcome, framing)
-            fallback_names = {f["name"].strip().lower() for f in fallback}
-            cleaned_group = [
-                g for g in group
-                if "auto_generated_kpi" not in g.get("quality_flags", [])
-                and "placeholder_kpi" not in g.get("quality_flags", [])
-            ]
+        if len(lagging_roots) != 1:
+            weak.append(outcome)
+            continue
 
-            names_existing = {g["name"].strip().lower() for g in cleaned_group}
-            for f in fallback:
-                if f["name"].strip().lower() not in names_existing:
-                    cleaned_group.append(f)
+        if len(leading) < 2:
+            weak.append(outcome)
+            continue
 
-            repaired.extend(cleaned_group)
-        else:
-            repaired.extend(group)
+        if has_bad_formula or has_bad_source or has_bad_owner or has_placeholder_name:
+            weak.append(outcome)
+            continue
 
-    repaired = merge_kpi_candidates([repaired])
-    repaired = enforce_kpi_hierarchy(outcomes, repaired)
-    repaired = enrich_kpi_quality(repaired)
-    return repaired
+    return weak
+
+
+def repair_weak_outcomes(payload: StrategyOutcomesKPIsInput, outcomes: list, kpis: list) -> list:
+    weak_outcomes = classify_weak_outcomes(outcomes, kpis)
+    if not weak_outcomes:
+        return kpis
+
+    weak_names = {o["name"] for o in weak_outcomes}
+    keep = [k for k in kpis if not any(lo in weak_names for lo in k.get("linked_outcomes", []))]
+
+    repair_context = build_repair_context(payload, [o["name"] for o in weak_outcomes])
+
+    user_prompt = f"""
+Corrija os outcomes problemáticos abaixo.
+
+Outcomes:
+{json.dumps(weak_outcomes, ensure_ascii=False)}
+
+Framing:
+{json.dumps(payload.framing, ensure_ascii=False)}
+
+Contexto:
+{repair_context}
+
+IMPORTANTE:
+- Para outcomes de comunidade/experiência, não use só NPS.
+- Para outcomes de produtividade comercial, incluir drivers concretos de adoção, leads ou conversão.
+- Para outcomes de estoque, evitar KPI genérico.
+- Para outcomes de receita, usar MRR/receita como lagging principal.
+"""
+
+    try:
+        repaired = call_llm_json(OUTCOME_KPI_REPAIR_PROMPT, user_prompt)
+        parsed = normalize_outcomes_kpis({
+            "outcomes": outcomes,
+            "kpis": repaired.get("kpis", []),
+        })
+        repaired_kpis = parsed["kpis"]
+        if not repaired_kpis:
+            fallback = []
+            for outcome in weak_outcomes:
+                fallback.extend(build_fallback_kpis_for_outcome(outcome))
+            repaired_kpis = fallback
+    except Exception:
+        fallback = []
+        for outcome in weak_outcomes:
+            fallback.extend(build_fallback_kpis_for_outcome(outcome))
+        repaired_kpis = fallback
+
+    merged = merge_kpi_candidates([keep, repaired_kpis])
+    merged = enforce_outcome_kpi_coverage(outcomes, merged)
+    merged = enforce_kpi_hierarchy(outcomes, merged)
+    merged = enrich_kpi_quality(merged)
+    return merged
 
 
 # =========================================================
@@ -1207,86 +1111,47 @@ Materiais:
     return {"framing": framing.model_dump()}
 
 
-def generate_outcomes_only(payload: StrategyOutcomesKPIsInput) -> list:
-    base_context = _truncate_text(build_outcomes_kpis_context(payload), 4500)
+def generate_strategy_outcomes_kpis(payload: StrategyOutcomesKPIsInput):
+    base_context = build_outcomes_kpis_context(payload)
+    base_context = _truncate_text(base_context, 5000)
+
     framing = payload.framing
-    theme_guidelines = build_theme_kpi_guidelines(framing)
 
     user_prompt = f"""
-Gere outcomes estratégicos a partir do framing abaixo.
+Gere outcomes e KPI hierarchy com ligação causal explícita a partir do framing estratégico.
 
 Framing:
 {json.dumps(framing, ensure_ascii=False)}
 
-Contexto:
+Materiais originais:
 {base_context}
 
-Diretrizes:
-{theme_guidelines}
+IMPORTANTE:
+- Para cada outcome, gerar exatamente 1 KPI lagging principal e 2 a 4 leading.
+- Para receita recorrente/clube, o KPI lagging deve ser MRR/receita recorrente.
+- Para churn/retenção, o KPI lagging deve ser churn ou retenção/renovação.
+- Para estoque/capital de giro, o KPI lagging deve ser capital empatado/valor total do estoque.
+- Para produtividade comercial, o KPI lagging deve ser produtividade/receita por vendedor, CAC ou receita incremental.
+- Para comunidade/experiência, não usar apenas NPS; incluir participação ativa/recorrência/engajamento como métrica principal ou drivers claros.
+- Não usar placeholders como "KPI Principal", "Definir fórmula", "A definir", "Indicador principal".
+- Owners devem ser áreas reais.
+- Sources devem ser concretas.
 """
 
-    data = call_llm_json(OUTCOMES_ONLY_PROMPT, user_prompt)
-    data = normalize_outcomes_kpis({"outcomes": data.get("outcomes", []), "kpis": []})
-    return data["outcomes"]
+    data = call_llm_json(OUTCOMES_KPIS_PROMPT, user_prompt)
+    data = normalize_outcomes_kpis(data)
+    outcomes = data["outcomes"]
+    kpis = data["kpis"]
 
+    kpis = enforce_outcome_kpi_coverage(outcomes, kpis)
+    kpis = enforce_kpi_hierarchy(outcomes, kpis)
+    kpis = enrich_kpi_quality(kpis)
+    kpis = repair_weak_outcomes(payload, outcomes, kpis)
 
-def generate_kpis_for_single_outcome(payload: StrategyOutcomesKPIsInput, outcome: dict) -> list:
-    framing = payload.framing
-    theme = _pick_theme_by_name(framing, outcome.get("linked_theme", ""))
-    context = build_outcome_specific_context(payload, outcome)
-
-    user_prompt = f"""
-Gere KPIs somente para este outcome.
-
-Outcome:
-{json.dumps(outcome, ensure_ascii=False)}
-
-Tema estratégico relacionado:
-{json.dumps(theme, ensure_ascii=False)}
-
-Contexto relevante:
-{context}
-
-Instruções adicionais:
-- O KPI lagging deve refletir o resultado final do outcome.
-- Os KPIs leading devem ser acionáveis.
-- Não usar placeholders.
-- Fórmulas e fontes devem ser concretas.
-"""
-
-    try:
-        response = call_llm_json(KPI_PER_OUTCOME_PROMPT, user_prompt)
-        parsed = normalize_outcomes_kpis({
-            "outcomes": [outcome],
-            "kpis": response.get("kpis", []),
-        })
-        kpis = parsed["kpis"]
-        if not kpis:
-            return build_fallback_kpis_for_outcome(outcome, framing)
-        return kpis
-    except Exception:
-        return build_fallback_kpis_for_outcome(outcome, framing)
-
-
-def generate_strategy_outcomes_kpis(payload: StrategyOutcomesKPIsInput):
-    outcomes = generate_outcomes_only(payload)
-
-    kpi_groups = []
-    for outcome in outcomes:
-        kpi_groups.append(generate_kpis_for_single_outcome(payload, outcome))
-
-    merged_kpis = merge_kpi_candidates(kpi_groups)
-    merged_kpis = enforce_outcome_kpi_coverage(outcomes, merged_kpis, payload.framing)
-    merged_kpis = enforce_kpi_hierarchy(outcomes, merged_kpis)
-    merged_kpis = enrich_kpi_quality(merged_kpis)
-    merged_kpis = repair_weak_kpis(outcomes, merged_kpis, payload.framing)
-
-    data = {
-        "outcomes": outcomes,
-        "kpis": merged_kpis,
-    }
-
-    outcomes_kpis = OutcomesKPIsOutput(**data)
+    outcomes_kpis = OutcomesKPIsOutput(
+        outcomes=outcomes,
+        kpis=kpis,
+    )
     return outcomes_kpis.model_dump()
 
 
