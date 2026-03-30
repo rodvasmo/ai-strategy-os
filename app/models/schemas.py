@@ -71,9 +71,71 @@ class StrategyInput(BaseModel):
     competitor_landscape_text: Optional[str] = None
     market_benchmarks_text: Optional[str] = None
     customer_research_text: Optional[str] = None
-
     performance_constraints_text: Optional[str] = None
     performance_constraints: List[Guardrail] = Field(default_factory=list)
+
+
+class StrategyOutcomesKPIsInput(BaseModel):
+    framing: Dict[str, Any]
+    company_name: Optional[str] = None
+    company_context: Optional[str] = None
+    annual_plan_text: Optional[str] = None
+    financial_model_text: Optional[str] = None
+    market_analysis_text: Optional[str] = None
+    leadership_notes_text: Optional[str] = None
+    kpi_targets_text: Optional[str] = None
+    scenario_assumptions_text: Optional[str] = None
+    industry_reports_text: Optional[str] = None
+    competitor_landscape_text: Optional[str] = None
+    market_benchmarks_text: Optional[str] = None
+    customer_research_text: Optional[str] = None
+    performance_constraints_text: Optional[str] = None
+    performance_constraints: List[Guardrail] = Field(default_factory=list)
+
+
+class StrategyInitiativesInput(BaseModel):
+    framing: Dict[str, Any]
+    outcomes: List[Dict[str, Any]]
+    kpis: List[Dict[str, Any]]
+    company_name: Optional[str] = None
+    company_context: Optional[str] = None
+    annual_plan_text: Optional[str] = None
+    financial_model_text: Optional[str] = None
+    market_analysis_text: Optional[str] = None
+    leadership_notes_text: Optional[str] = None
+    kpi_targets_text: Optional[str] = None
+    scenario_assumptions_text: Optional[str] = None
+    industry_reports_text: Optional[str] = None
+    competitor_landscape_text: Optional[str] = None
+    market_benchmarks_text: Optional[str] = None
+    customer_research_text: Optional[str] = None
+    performance_constraints_text: Optional[str] = None
+    performance_constraints: List[Guardrail] = Field(default_factory=list)
+
+
+class StrategyReviewInput(BaseModel):
+    framing: Dict[str, Any]
+    outcomes: List[Dict[str, Any]]
+    kpis: List[Dict[str, Any]]
+    initiatives: List[Dict[str, Any]]
+    strategy_graph: Dict[str, Any]
+    performance_constraints: List[Guardrail] = Field(default_factory=list)
+
+
+# =========================================================
+# FILE INGESTION
+# =========================================================
+class StrategyFileIngestResponse(BaseModel):
+    annual_plan_text: str = ""
+    financial_model_text: str = ""
+    market_analysis_text: str = ""
+    leadership_notes_text: str = ""
+    kpi_targets_text: str = ""
+    scenario_assumptions_text: str = ""
+    industry_reports_text: str = ""
+    competitor_landscape_text: str = ""
+    market_benchmarks_text: str = ""
+    customer_research_text: str = ""
 
 
 # =========================================================
@@ -103,34 +165,23 @@ class Outcome(BaseModel):
     name: str
     linked_theme: str
     target: str
+    timeframe: str
+    value_driver: str
+
+
+KPIType = Literal["leading", "lagging"]
+KPILevel = Literal["north_star", "driver", "supporting"]
 
 
 class KPI(BaseModel):
     name: str
-    type: str
+    type: KPIType
+    level: KPILevel
+    linked_outcomes: List[str]
     target: str
     owner: str
     formula: str
     source: str
-    kpi_role: Optional[str] = None
-
-
-class StrategyOutcomesKPIsInput(BaseModel):
-    framing: Dict[str, Any]
-    company_name: Optional[str] = None
-    company_context: Optional[str] = None
-    annual_plan_text: Optional[str] = None
-    financial_model_text: Optional[str] = None
-    market_analysis_text: Optional[str] = None
-    leadership_notes_text: Optional[str] = None
-    kpi_targets_text: Optional[str] = None
-    scenario_assumptions_text: Optional[str] = None
-    industry_reports_text: Optional[str] = None
-    competitor_landscape_text: Optional[str] = None
-    market_benchmarks_text: Optional[str] = None
-    customer_research_text: Optional[str] = None
-    performance_constraints_text: Optional[str] = None
-    performance_constraints: List[Guardrail] = Field(default_factory=list)
 
 
 class OutcomesKPIsOutput(BaseModel):
@@ -145,6 +196,7 @@ class Initiative(BaseModel):
     name: str
     linked_theme: str
     linked_outcome: str
+    linked_kpis: List[str]
     expected_impact: str
     expected_kpi_delta: str
     time_horizon: str
@@ -169,84 +221,14 @@ class StrategyGraphNode(BaseModel):
     causal_logic: str = ""
 
 
-class StrategyInitiativesInput(BaseModel):
-    framing: Dict[str, Any]
-    outcomes: List[Outcome]
-    kpis: List[KPI]
-
-    company_name: Optional[str] = None
-    company_context: Optional[str] = None
-    annual_plan_text: Optional[str] = None
-    financial_model_text: Optional[str] = None
-    market_analysis_text: Optional[str] = None
-    leadership_notes_text: Optional[str] = None
-    kpi_targets_text: Optional[str] = None
-    scenario_assumptions_text: Optional[str] = None
-    industry_reports_text: Optional[str] = None
-    competitor_landscape_text: Optional[str] = None
-    market_benchmarks_text: Optional[str] = None
-    customer_research_text: Optional[str] = None
-    performance_constraints_text: Optional[str] = None
-    performance_constraints: List[Guardrail] = Field(default_factory=list)
-
-
 class InitiativesOutput(BaseModel):
     initiatives: List[Initiative]
     strategy_graph: Dict[str, StrategyGraphNode]
 
 
 # =========================================================
-# KPI SCREEN
-# =========================================================
-class KPILinkedInitiative(BaseModel):
-    name: str
-    owner: str
-    status: str
-    time_horizon: str
-    expected_impact: str
-    priority_band: Optional[str] = None
-    priority_score: Optional[int] = None
-
-
-class KPIView(BaseModel):
-    name: str
-    type: str
-    target: str
-    owner: str
-    formula: str
-    source: str
-    kpi_role: Optional[str] = None
-    linked_outcomes: List[str] = Field(default_factory=list)
-    linked_initiatives: List[KPILinkedInitiative] = Field(default_factory=list)
-    coverage_score: int = 0
-    coverage_status: str = "baixo"
-
-
-class KPIScreenInput(BaseModel):
-    framing: Dict[str, Any]
-    outcomes: List[Outcome]
-    kpis: List[KPI]
-    initiatives: List[Initiative]
-    strategy_graph: Dict[str, Any]
-
-
-class KPIScreenOutput(BaseModel):
-    kpis: List[KPIView]
-    summary: Dict[str, Any]
-
-
-# =========================================================
 # REVIEW
 # =========================================================
-class StrategyReviewInput(BaseModel):
-    framing: Dict[str, Any]
-    outcomes: List[Outcome]
-    kpis: List[KPI]
-    initiatives: List[Initiative]
-    strategy_graph: Dict[str, Any]
-    performance_constraints: List[Guardrail] = Field(default_factory=list)
-
-
 class KPIIssue(BaseModel):
     kpi_name: str
     issue_type: str
@@ -296,22 +278,6 @@ class NarrativeOutput(BaseModel):
 
 
 # =========================================================
-# FILE INGESTION
-# =========================================================
-class StrategyFileIngestResponse(BaseModel):
-    annual_plan_text: str = ""
-    financial_model_text: str = ""
-    market_analysis_text: str = ""
-    leadership_notes_text: str = ""
-    kpi_targets_text: str = ""
-    scenario_assumptions_text: str = ""
-    industry_reports_text: str = ""
-    competitor_landscape_text: str = ""
-    market_benchmarks_text: str = ""
-    customer_research_text: str = ""
-
-
-# =========================================================
 # SCORE
 # =========================================================
 class StrategyScoreDiagnostics(BaseModel):
@@ -340,9 +306,9 @@ class ExecutiveSummary(BaseModel):
 
 class FullStrategyAnalysisResponse(BaseModel):
     framing: Dict[str, Any]
-    outcomes: List[Outcome]
-    kpis: List[KPI]
-    initiatives: List[Initiative]
+    outcomes: List[Dict[str, Any]]
+    kpis: List[Dict[str, Any]]
+    initiatives: List[Dict[str, Any]]
     strategy_graph: Dict[str, Any]
     kpi_integrity: Dict[str, Any]
     portfolio: Dict[str, Any]
