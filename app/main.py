@@ -18,6 +18,7 @@ from app.services.orchestrator import (
     generate_strategy_initiatives,
     generate_strategy_review,
     run_full_strategy_analysis,
+    run_full_strategy_analysis_stable,  # ✅ NOVO
 )
 
 from app.services.parser import extract_text_from_upload
@@ -25,7 +26,7 @@ from app.services.parser import extract_text_from_upload
 
 app = FastAPI(
     title="AI Strategy OS API",
-    version="0.2.0",
+    version="0.3.0",
 )
 
 # =========================================================
@@ -33,7 +34,7 @@ app = FastAPI(
 # =========================================================
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # depois restringe
+    allow_origins=["*"],
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -133,7 +134,7 @@ def strategy_review(payload: StrategyReviewInput):
 
 
 # =========================================================
-# FULL PIPELINE (END-TO-END)
+# FULL PIPELINE (ANTIGO)
 # =========================================================
 @app.post("/run-strategy-analysis", response_model=FullStrategyAnalysisResponse)
 def run_strategy_analysis(payload: StrategyInput):
@@ -144,40 +145,11 @@ def run_strategy_analysis(payload: StrategyInput):
 
 
 # =========================================================
-# LEGACY ENDPOINT PARA COMPATIBILIDADE TEMPORÁRIA
+# FULL PIPELINE (NOVO ESTÁVEL)
 # =========================================================
-# Mantenha comentado se não precisar mais do fluxo antigo.
-"""
-from app.models.schemas import StrategyMappingInput
-
-@app.post("/generate-strategy-mapping")
-def legacy_mapping(payload: StrategyMappingInput):
+@app.post("/run-strategy-analysis-stable", response_model=FullStrategyAnalysisResponse)
+def run_strategy_analysis_stable(payload: StrategyInput):
     try:
-        framing = payload.framing
-
-        outcomes_kpis = generate_strategy_outcomes_kpis(
-            StrategyOutcomesKPIsInput(
-                framing=framing,
-                **payload.model_dump(exclude={"framing"})
-            )
-        )
-
-        initiatives = generate_strategy_initiatives(
-            StrategyInitiativesInput(
-                framing=framing,
-                outcomes=outcomes_kpis["outcomes"],
-                kpis=outcomes_kpis["kpis"],
-                **payload.model_dump(exclude={"framing"})
-            )
-        )
-
-        return {
-            "outcomes": outcomes_kpis["outcomes"],
-            "kpis": outcomes_kpis["kpis"],
-            "initiatives": initiatives["initiatives"],
-            "strategy_graph": initiatives["strategy_graph"],
-        }
-
+        return run_full_strategy_analysis_stable(payload)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-"""

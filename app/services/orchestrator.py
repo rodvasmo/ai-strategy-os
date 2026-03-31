@@ -1536,3 +1536,136 @@ def run_full_strategy_analysis(payload: StrategyInput):
         "strategy_score": review_result["strategy_score"],
         "executive_summary": executive_summary,
     }
+
+# 👇👇👇 ADICIONE EXATAMENTE A PARTIR DAQUI 👇👇👇
+
+# =========================================================
+# 🔒 STRUCTURE FREEZE (NEW - ADD ONLY)
+# =========================================================
+
+def generate_strategy_structure(payload: StrategyInput):
+    """
+    Gera e congela:
+    - framing
+    - outcomes
+    - kpis
+    """
+
+    framing_result = generate_strategy_framing(payload)
+    framing = framing_result["framing"]
+
+    outcomes_kpis_payload = StrategyOutcomesKPIsInput(
+        framing=framing,
+        company_name=payload.company_name,
+        company_context=payload.company_context,
+        annual_plan_text=payload.annual_plan_text,
+        financial_model_text=payload.financial_model_text,
+        market_analysis_text=payload.market_analysis_text,
+        leadership_notes_text=payload.leadership_notes_text,
+        kpi_targets_text=payload.kpi_targets_text,
+        scenario_assumptions_text=payload.scenario_assumptions_text,
+        industry_reports_text=payload.industry_reports_text,
+        competitor_landscape_text=payload.competitor_landscape_text,
+        market_benchmarks_text=payload.market_benchmarks_text,
+        customer_research_text=payload.customer_research_text,
+        performance_constraints_text=payload.performance_constraints_text,
+        performance_constraints=payload.performance_constraints,
+    )
+
+    outcomes_kpis_result = generate_strategy_outcomes_kpis(outcomes_kpis_payload)
+
+    return {
+        "framing": framing,
+        "outcomes": outcomes_kpis_result["outcomes"],
+        "kpis": outcomes_kpis_result["kpis"],
+    }
+
+
+def generate_strategy_initiatives_from_structure(structure: dict, payload: StrategyInput):
+    """
+    Gera iniciativas SEM recalcular KPIs
+    """
+
+    initiatives_payload = StrategyInitiativesInput(
+        framing=structure["framing"],
+        outcomes=structure["outcomes"],
+        kpis=structure["kpis"],
+        company_name=payload.company_name,
+        company_context=payload.company_context,
+        annual_plan_text=payload.annual_plan_text,
+        financial_model_text=payload.financial_model_text,
+        market_analysis_text=payload.market_analysis_text,
+        leadership_notes_text=payload.leadership_notes_text,
+        kpi_targets_text=payload.kpi_targets_text,
+        scenario_assumptions_text=payload.scenario_assumptions_text,
+        industry_reports_text=payload.industry_reports_text,
+        competitor_landscape_text=payload.competitor_landscape_text,
+        market_benchmarks_text=payload.market_benchmarks_text,
+        customer_research_text=payload.customer_research_text,
+        performance_constraints_text=payload.performance_constraints_text,
+        performance_constraints=payload.performance_constraints,
+    )
+
+    return generate_strategy_initiatives(initiatives_payload)
+
+
+def run_full_strategy_analysis_stable(payload: StrategyInput):
+    """
+    PIPELINE ESTÁVEL:
+    - KPIs NÃO mudam
+    - Outcomes NÃO mudam
+    - Só iniciativas variam
+    """
+
+    # STEP 1 — FREEZE
+    structure = generate_strategy_structure(payload)
+
+    # STEP 2 — INITIATIVES
+    initiatives_result = generate_strategy_initiatives_from_structure(
+        structure,
+        payload
+    )
+
+    initiatives = initiatives_result["initiatives"]
+    strategy_graph = initiatives_result["strategy_graph"]
+
+    strategy_coverage = initiatives_result.get("strategy_coverage")
+    strategy_coverage = enrich_coverage_with_priority(
+        strategy_coverage,
+        structure["outcomes"]
+    )
+
+    # STEP 3 — REVIEW
+    review_payload = StrategyReviewInput(
+        framing=structure["framing"],
+        outcomes=structure["outcomes"],
+        kpis=structure["kpis"],
+        initiatives=initiatives,
+        strategy_graph=strategy_graph,
+        performance_constraints=payload.performance_constraints,
+    )
+
+    review_result = generate_strategy_review(review_payload)
+
+    executive_summary = build_executive_summary(
+        payload=payload,
+        framing=structure["framing"],
+        outcomes=structure["outcomes"],
+        kpis=structure["kpis"],
+        initiatives=initiatives,
+        review=review_result,
+    )
+
+    return {
+        "framing": structure["framing"],
+        "outcomes": structure["outcomes"],
+        "kpis": structure["kpis"],
+        "initiatives": initiatives,
+        "strategy_graph": strategy_graph,
+        "strategy_coverage": strategy_coverage,
+        "kpi_integrity": review_result["kpi_integrity"],
+        "portfolio": review_result["portfolio"],
+        "narrative": review_result["narrative"],
+        "strategy_score": review_result["strategy_score"],
+        "executive_summary": executive_summary,
+    }

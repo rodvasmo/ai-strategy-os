@@ -93,10 +93,18 @@ class StrategyOutcomesKPIsInput(BaseModel):
     performance_constraints: List[Guardrail] = Field(default_factory=list)
 
 
-class StrategyInitiativesInput(BaseModel):
+# =========================================================
+# 🔒 STRUCTURE FREEZE (NOVO)
+# =========================================================
+class StrategyStructure(BaseModel):
     framing: Dict[str, Any]
     outcomes: List[Dict[str, Any]]
     kpis: List[Dict[str, Any]]
+
+
+class StrategyInitiativesInput(BaseModel):
+    structure: StrategyStructure  # 🔒 agora usa estrutura fixa
+
     company_name: Optional[str] = None
     company_context: Optional[str] = None
     annual_plan_text: Optional[str] = None
