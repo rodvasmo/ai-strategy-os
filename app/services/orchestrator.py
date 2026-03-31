@@ -935,7 +935,8 @@ def normalize_initiatives(initiatives_data: dict, outcomes: list, kpis: list) ->
         initiatives_data.get("initiatives", [])
     )
 
-    outcome_names = {o["name"] for o in outcomes}
+    outcome_map = {o["name"]: o for o in outcomes}
+    outcome_names = set(outcome_map.keys())
     kpi_names = {k["name"] for k in kpis}
 
     normalized = []
@@ -943,23 +944,31 @@ def normalize_initiatives(initiatives_data: dict, outcomes: list, kpis: list) ->
         if not isinstance(item, dict):
             continue
 
-        linked_kpis = _dict_values_as_list(item.get("linked_kpis", []))
-        linked_kpis = [str(x).strip() for x in linked_kpis if str(x).strip() in kpi_names]
+        name = str(item.get("name", "")).strip()
+        if not name:
+            continue
 
         linked_outcome = str(item.get("linked_outcome", "")).strip()
         if linked_outcome not in outcome_names:
             linked_outcome = ""
 
+        linked_theme = str(item.get("linked_theme", "")).strip()
+        if linked_outcome and not linked_theme:
+            linked_theme = str(outcome_map[linked_outcome].get("linked_theme", "")).strip()
+
+        linked_kpis = _dict_values_as_list(item.get("linked_kpis", []))
+        linked_kpis = [str(x).strip() for x in linked_kpis if str(x).strip() in kpi_names]
+
         normalized.append(
             {
-                "name": str(item.get("name", "")).strip(),
-                "linked_theme": str(item.get("linked_theme", "")).strip(),
+                "name": name,
+                "linked_theme": linked_theme,
                 "linked_outcome": linked_outcome,
                 "linked_kpis": linked_kpis,
-                "expected_impact": str(item.get("expected_impact", "")).strip(),
-                "expected_kpi_delta": str(item.get("expected_kpi_delta", "")).strip(),
-                "time_horizon": str(item.get("time_horizon", "")).strip(),
-                "owner": str(item.get("owner", "")).strip(),
+                "expected_impact": str(item.get("expected_impact", "")).strip() or "Melhorar execução e capturar resultado de negócio.",
+                "expected_kpi_delta": str(item.get("expected_kpi_delta", "")).strip() or "Melhoria mensurável nos KPIs associados.",
+                "time_horizon": str(item.get("time_horizon", "")).strip() or "6 meses",
+                "owner": str(item.get("owner", "")).strip() or "Estratégia",
                 "status": str(item.get("status", "")).strip().lower() or "planejado",
             }
         )
@@ -968,36 +977,118 @@ def normalize_initiatives(initiatives_data: dict, outcomes: list, kpis: list) ->
     return initiatives_data
 
 
+def _infer_outcome_from_text(initiative: dict, outcomes: list) -> str:
+    text = f"{initiative.get('name', '')} {initiative.get('expected_impact', '')} {initiative.get('expected_kpi_delta', '')}".lower()
+
+    best_match = ""
+    best_score = 0
+
+    for outcome in outcomes:
+        outcome_name = outcome["name"]
+        tokens = [t for t in outcome_name.lower().split() if len(t) > 4]
+        score = sum(1 for token in tokens if token in text)
+        if score > best_score:
+            best_score = score
+            best_match = outcome_name
+
+    return best_match if best_score > 0 else ""
+
+
+def _pick_best_kpis_for_outcome(kpis: list, outcome_name: str, max_items: int = 3) -> list:
+    related = [k for k in kpis if outcome_name in k.get("linked_outcomes", [])]
+    leading = [k["name"] for k in related if k.get("type") == "leading"]
+    lagging = [k["name"] for k in related if k.get("type") == "lagging"]
+
+    picked = leading[:max_items]
+    if not picked and lagging:
+        picked = lagging[:1]
+
+    return picked[:max_items]
+
+
 def enforce_initiative_links(outcomes: list, kpis: list, initiatives: list) -> list:
-    outcome_names = {o["name"] for o in outcomes}
-    kpis_by_outcome = defaultdict(list)
-
-    for kpi in kpis:
-        for linked_outcome in kpi.get("linked_outcomes", []):
-            kpis_by_outcome[linked_outcome].append(kpi["name"])
-
-    fixed = []
+    outcome_map = {o["name"]: o for o in outcomes}
+    outcome_names = set(outcome_map.keys())
     all_kpi_names = {k["name"] for k in kpis}
 
+    fixed = []
     for initiative in initiatives:
-        linked_outcome = initiative.get("linked_outcome", "")
-        linked_kpis = [k for k in initiative.get("linked_kpis", []) if k in all_kpi_names]
+        item = dict(initiative)
 
+        linked_outcome = str(item.get("linked_outcome", "")).strip()
         if linked_outcome not in outcome_names:
-            text = f"{initiative.get('name', '')} {initiative.get('expected_impact', '')}".lower()
-            for outcome in outcomes:
-                tokens = [t for t in outcome["name"].lower().split() if len(t) > 4]
-                if any(token in text for token in tokens):
-                    linked_outcome = outcome["name"]
-                    break
+            linked_outcome = _infer_outcome_from_text(item, outcomes)
 
+        if linked_outcome:
+            item["linked_outcome"] = linked_outcome
+
+            if not str(item.get("linked_theme", "")).strip():
+                item["linked_theme"] = str(outcome_map[linked_outcome].get("linked_theme", "")).strip()
+
+        linked_kpis = [k for k in item.get("linked_kpis", []) if k in all_kpi_names]
         if linked_outcome and not linked_kpis:
-            linked_kpis = kpis_by_outcome.get(linked_outcome, [])[:2]
+            linked_kpis = _pick_best_kpis_for_outcome(kpis, linked_outcome, max_items=3)
 
-        fixed_item = dict(initiative)
-        fixed_item["linked_outcome"] = linked_outcome
-        fixed_item["linked_kpis"] = linked_kpis
-        fixed.append(fixed_item)
+        item["linked_kpis"] = linked_kpis
+        fixed.append(item)
+
+    return fixed
+
+
+def ensure_minimum_initiatives_per_outcome(outcomes: list, kpis: list, initiatives: list) -> list:
+    by_outcome = defaultdict(list)
+    for initiative in initiatives:
+        outcome_name = initiative.get("linked_outcome", "")
+        if outcome_name:
+            by_outcome[outcome_name].append(initiative)
+
+    fixed = list(initiatives)
+
+    for outcome in outcomes:
+        outcome_name = outcome["name"]
+        theme_name = outcome.get("linked_theme", "")
+        current = by_outcome.get(outcome_name, [])
+
+        if len(current) >= 2:
+            continue
+
+        linked_kpis = _pick_best_kpis_for_outcome(kpis, outcome_name, max_items=2)
+
+        defaults = [
+            {
+                "name": f"Estruturar playbook operacional para acelerar {outcome_name.lower()}",
+                "linked_theme": theme_name,
+                "linked_outcome": outcome_name,
+                "linked_kpis": linked_kpis,
+                "expected_impact": "Aumentar consistência de execução e capturar resultado de negócio com mais previsibilidade.",
+                "expected_kpi_delta": "Melhoria gradual nos principais drivers do outcome.",
+                "time_horizon": "6 meses",
+                "owner": "Estratégia",
+                "status": "planejado",
+            },
+            {
+                "name": f"Implantar rotina de gestão e acompanhamento para sustentar {outcome_name.lower()}",
+                "linked_theme": theme_name,
+                "linked_outcome": outcome_name,
+                "linked_kpis": linked_kpis,
+                "expected_impact": "Reduzir dispersão de execução e melhorar governança sobre os indicadores do outcome.",
+                "expected_kpi_delta": "Maior estabilidade e evolução dos KPIs vinculados.",
+                "time_horizon": "3 meses",
+                "owner": "Operações",
+                "status": "planejado",
+            },
+        ]
+
+        existing_names = {i["name"] for i in current}
+        current_count = len(current)
+
+        for candidate in defaults:
+            if candidate["name"] not in existing_names:
+                fixed.append(candidate)
+                existing_names.add(candidate["name"])
+                current_count += 1
+            if current_count >= 2:
+                break
 
     return fixed
 
@@ -1017,9 +1108,9 @@ def rebuild_strategy_graph(outcomes: list, kpis: list, initiatives: list) -> dic
             kpi = kpi_map.get(kpi_name)
             if not kpi:
                 continue
-            if kpi["type"] == "leading" and not leading:
+            if kpi.get("type") == "leading" and not leading:
                 leading = kpi_name
-            if kpi["type"] == "lagging" and not lagging:
+            if kpi.get("type") == "lagging" and not lagging:
                 lagging = kpi_name
 
         if not lagging and linked_outcome:
@@ -1176,10 +1267,20 @@ KPIs:
 
 Materiais originais:
 {base_context}
+
+IMPORTANTE:
+- Todos os outcomes precisam ter iniciativas.
+- Gere no mínimo 2 iniciativas por outcome.
+- As iniciativas devem parecer cobradas por um executivo real.
+- Evite nomes vagos.
+- Priorize KPIs leading em linked_kpis.
+- Não gere strategy_graph.
 """
+
     data = call_llm_json(INITIATIVES_PROMPT, user_prompt)
     data = normalize_initiatives(data, outcomes, kpis)
     data["initiatives"] = enforce_initiative_links(outcomes, kpis, data["initiatives"])
+    data["initiatives"] = ensure_minimum_initiatives_per_outcome(outcomes, kpis, data["initiatives"])
     data = prioritize_initiatives(data)
     strategy_graph = rebuild_strategy_graph(outcomes, kpis, data.get("initiatives", []))
 

@@ -98,9 +98,8 @@ async def ingest_strategy_files_route(
 
 
 # =========================================================
-# NEW PIPELINE ENDPOINTS
+# PIPELINE ENDPOINTS
 # =========================================================
-
 @app.post("/generate-strategy-framing")
 def strategy_framing(payload: StrategyInput):
     try:
@@ -145,10 +144,9 @@ def run_strategy_analysis(payload: StrategyInput):
 
 
 # =========================================================
-# (OPCIONAL) LEGACY ENDPOINT PARA NÃO QUEBRAR FRONT
+# LEGACY ENDPOINT PARA COMPATIBILIDADE TEMPORÁRIA
 # =========================================================
-# Se quiser manter compatibilidade com o fluxo antigo temporariamente
-
+# Mantenha comentado se não precisar mais do fluxo antigo.
 """
 from app.models.schemas import StrategyMappingInput
 

@@ -231,50 +231,6 @@ class InitiativesOutput(BaseModel):
 
 
 # =========================================================
-# STRATEGY QUALITY AUDIT
-# =========================================================
-class StrategyQualityIssue(BaseModel):
-    level: str
-    entity_name: str
-    issue_type: str
-    severity: str
-    description: str
-    recommendation: str
-
-
-class OutcomeQualityReview(BaseModel):
-    outcome_name: str
-    assessment: str
-    main_gap: str
-    recommended_improvement: str
-
-
-class KPIQualityReview(BaseModel):
-    kpi_name: str
-    assessment: str
-    main_gap: str
-    recommended_improvement: str
-
-
-class StrategyRepairPriority(BaseModel):
-    priority_rank: int
-    entity_type: str
-    entity_name: str
-    why_fix_now: str
-    suggested_fix: str
-
-
-class StrategyQualityOutput(BaseModel):
-    overall_assessment: str
-    quality_score: int
-    strengths: List[str]
-    critical_issues: List[StrategyQualityIssue]
-    outcome_reviews: List[OutcomeQualityReview]
-    kpi_reviews: List[KPIQualityReview]
-    repair_priorities: List[StrategyRepairPriority]
-
-
-# =========================================================
 # REVIEW
 # =========================================================
 class KPIIssue(BaseModel):
@@ -362,5 +318,4 @@ class FullStrategyAnalysisResponse(BaseModel):
     portfolio: Dict[str, Any]
     narrative: Dict[str, Any]
     strategy_score: Dict[str, Any]
-    strategy_quality: Optional[Dict[str, Any]] = None
     executive_summary: ExecutiveSummary
