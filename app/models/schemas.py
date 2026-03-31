@@ -225,9 +225,43 @@ class StrategyGraphNode(BaseModel):
     causal_logic: str = ""
 
 
+# =========================================================
+# STRATEGY COVERAGE
+# =========================================================
+class KPICoverageItem(BaseModel):
+    kpi_name: str
+    kpi_type: str
+    outcome_names: List[str]
+    initiative_count: int
+    initiative_names: List[str]
+    covered: bool
+
+
+class OutcomeCoverageItem(BaseModel):
+    outcome_name: str
+    total_kpis: int
+    covered_kpis: int
+    uncovered_kpis: List[str]
+    fully_covered: bool
+
+
+class StrategyCoverageOutput(BaseModel):
+    total_outcomes: int
+    covered_outcomes: int
+    total_kpis: int
+    covered_kpis: int
+    uncovered_kpis_count: int
+    kpi_coverage_pct: float
+    outcome_coverage_pct: float
+    uncovered_kpis: List[KPICoverageItem]
+    kpi_coverage_details: List[KPICoverageItem]
+    outcome_coverage_details: List[OutcomeCoverageItem]
+
+
 class InitiativesOutput(BaseModel):
     initiatives: List[Initiative]
     strategy_graph: Dict[str, StrategyGraphNode]
+    strategy_coverage: Optional[StrategyCoverageOutput] = None
 
 
 # =========================================================
@@ -314,6 +348,7 @@ class FullStrategyAnalysisResponse(BaseModel):
     kpis: List[Dict[str, Any]]
     initiatives: List[Dict[str, Any]]
     strategy_graph: Dict[str, Any]
+    strategy_coverage: Optional[Dict[str, Any]] = None
     kpi_integrity: Dict[str, Any]
     portfolio: Dict[str, Any]
     narrative: Dict[str, Any]
