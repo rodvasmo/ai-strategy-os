@@ -15,7 +15,6 @@ from app.models.schemas import (
     KPIIntegrityOutput,
     PortfolioOutput,
     NarrativeOutput,
-    StrategyQualityOutput,
 )
 from app.services.parser import (
     build_framing_context,
@@ -30,7 +29,6 @@ from app.agents.strategy_initiatives_agent import SYSTEM_PROMPT as INITIATIVES_P
 from app.agents.kpi_integrity_agent import SYSTEM_PROMPT as KPI_PROMPT
 from app.agents.portfolio_intelligence_agent import SYSTEM_PROMPT as PORTFOLIO_PROMPT
 from app.agents.narrative_agent import SYSTEM_PROMPT as NARRATIVE_PROMPT
-from app.agents.strategy_quality_agent import SYSTEM_PROMPT as STRATEGY_QUALITY_PROMPT
 
 
 OUTCOME_KPI_REPAIR_PROMPT = """
@@ -267,13 +265,13 @@ Complete o framing mantendo a lógica já construída.
         repaired["assumptions"] = repaired.get("assumptions", []) + [
             "A empresa conseguirá equilibrar crescimento e rentabilidade.",
             "Os investimentos em tecnologia gerarão ganhos reais de produtividade.",
-            "A base de clientes responderá positivamente à proposta de valor.",
+            "A base de clientes responderá positivamente à proposta de valor."
         ]
 
     if len(repaired.get("contradictions", [])) < 2:
         repaired["contradictions"] = repaired.get("contradictions", []) + [
             "A empresa busca crescer, mas enfrenta limites de rentabilidade e capital.",
-            "A diferenciação comercial pode aumentar complexidade operacional.",
+            "A diferenciação comercial pode aumentar complexidade operacional."
         ]
 
     repaired["assumptions"] = repaired["assumptions"][:6]
@@ -928,24 +926,6 @@ IMPORTANTE:
     return merged
 
 
-def generate_strategy_quality_audit(framing: dict, outcomes: list, kpis: list) -> dict:
-    user_prompt = f"""
-Audite criticamente a estrutura abaixo.
-
-Framing:
-{json.dumps(framing, ensure_ascii=False)}
-
-Outcomes:
-{json.dumps(outcomes, ensure_ascii=False)}
-
-KPIs:
-{json.dumps(kpis, ensure_ascii=False)}
-"""
-    quality_data = call_llm_json(STRATEGY_QUALITY_PROMPT, user_prompt)
-    quality_output = StrategyQualityOutput(**quality_data)
-    return quality_output.model_dump()
-
-
 # =========================================================
 # INITIATIVES
 # =========================================================
@@ -1052,7 +1032,7 @@ def rebuild_strategy_graph(outcomes: list, kpis: list, initiatives: list) -> dic
             "kpi_leading": leading,
             "kpi_lagging": lagging,
             "outcome": linked_outcome,
-            "causal_logic": f"A iniciativa '{initiative['name']}' move KPI(s) {', '.join(linked_kpis)} e contribui para o outcome '{linked_outcome}'.",
+            "causal_logic": f"A iniciativa '{initiative['name']}' move KPI(s) {', '.join(linked_kpis)} e contribui para o outcome '{linked_outcome}'."
         }
 
     return graph
@@ -1168,22 +1148,11 @@ IMPORTANTE:
     kpis = enrich_kpi_quality(kpis)
     kpis = repair_weak_outcomes(payload, outcomes, kpis)
 
-    strategy_quality = generate_strategy_quality_audit(
-        framing=framing,
-        outcomes=outcomes,
-        kpis=kpis,
-    )
-
     outcomes_kpis = OutcomesKPIsOutput(
         outcomes=outcomes,
         kpis=kpis,
     )
-
-    return {
-        "outcomes": outcomes_kpis.model_dump()["outcomes"],
-        "kpis": outcomes_kpis.model_dump()["kpis"],
-        "strategy_quality": strategy_quality,
-    }
+    return outcomes_kpis.model_dump()
 
 
 def generate_strategy_initiatives(payload: StrategyInitiativesInput):
@@ -1343,7 +1312,6 @@ def run_full_strategy_analysis(payload: StrategyInput):
     outcomes_kpis_result = generate_strategy_outcomes_kpis(outcomes_kpis_payload)
     outcomes = outcomes_kpis_result["outcomes"]
     kpis = outcomes_kpis_result["kpis"]
-    strategy_quality = outcomes_kpis_result.get("strategy_quality")
 
     initiatives_payload = StrategyInitiativesInput(
         framing=framing,
@@ -1397,6 +1365,5 @@ def run_full_strategy_analysis(payload: StrategyInput):
         "portfolio": review_result["portfolio"],
         "narrative": review_result["narrative"],
         "strategy_score": review_result["strategy_score"],
-        "strategy_quality": strategy_quality,
         "executive_summary": executive_summary,
     }
